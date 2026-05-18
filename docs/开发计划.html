@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>FileFTP - 开发计划</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #f5f5f5;
+      color: #333;
+      line-height: 1.8;
+      padding: 40px;
+    }
+    .container {
+      max-width: 1000px;
+      margin: 0 auto;
+      background: white;
+      border-radius: 12px;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.08);
+      overflow: hidden;
+    }
+    .header {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      padding: 40px;
+    }
+    .header h1 { font-size: 32px; margin-bottom: 8px; }
+    .header .subtitle { opacity: 0.9; font-size: 14px; }
+    .header .date { margin-top: 16px; font-size: 13px; opacity: 0.8; }
+    .content { padding: 40px; }
+    h2 {
+      color: #667eea;
+      font-size: 20px;
+      margin: 32px 0 16px;
+      padding-bottom: 8px;
+      border-bottom: 2px solid #f0f0f0;
+    }
+    h2:first-child { margin-top: 0; }
+    h3 { font-size: 16px; color: #555; margin: 20px 0 10px; }
+    p { margin: 10px 0; color: #666; }
+    ul, ol { margin: 10px 0 10px 24px; color: #666; }
+    li { margin: 6px 0; }
+    code {
+      background: #f5f5f5;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-family: 'Consolas', monospace;
+      font-size: 13px;
+      color: #667eea;
+    }
+    pre {
+      background: #2d2d2d;
+      color: #f8f8f2;
+      padding: 16px 20px;
+      border-radius: 8px;
+      overflow-x: auto;
+      margin: 16px 0;
+      font-size: 13px;
+      line-height: 1.6;
+    }
+    pre code { background: none; padding: 0; color: inherit; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 16px 0;
+    }
+    th, td {
+      padding: 12px 16px;
+      text-align: left;
+      border-bottom: 1px solid #eee;
+    }
+    th {
+      background: #f8f9fa;
+      font-weight: 600;
+      color: #333;
+    }
+    tr:hover td { background: #fafafa; }
+    .status {
+      display: inline-block;
+      padding: 2px 10px;
+      border-radius: 12px;
+      font-size: 12px;
+      font-weight: 500;
+    }
+    .status-done { background: #d4edda; color: #155724; }
+    .status-progress { background: #cce5ff; color: #004085; }
+    .status-pending { background: #fff3cd; color: #856404; }
+    .section { margin: 24px 0; }
+    .highlight {
+      background: linear-gradient(120deg, #a8edea 0%, #fed6e3 100%);
+      padding: 16px 20px;
+      border-radius: 8px;
+      margin: 16px 0;
+    }
+    .files-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+      gap: 12px;
+      margin: 16px 0;
+    }
+    .file-item {
+      background: #f8f9fa;
+      padding: 12px 16px;
+      border-radius: 6px;
+      font-family: monospace;
+      font-size: 13px;
+    }
+    .api-table td:first-child { font-family: monospace; font-size: 13px; color: #667eea; }
+    .checklist { list-style: none; margin-left: 0; }
+    .checklist li { padding-left: 24px; position: relative; }
+    .checklist li::before { content: '☐'; position: absolute; left: 0; color: #667eea; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>FileFTP - 文件上传下载浏览系统</h1>
+      <p class="subtitle">技术栈: Node.js + Express + MongoDB</p>
+      <p class="date">创建日期: 2026-05-18</p>
+      <div style="margin-top:12px"><span style="background:rgba(255,255,255,0.2);padding:4px 12px;border-radius:12px;font-size:12px">V1.0</span></div>
+    </div>
+
+    <div class="content">
+      <h2>项目概述</h2>
+      <div class="section">
+        <p>一个完整的文件管理系统，支持Web端和移动端浏览，包含用户认证、文件上传下载、文件夹管理、开放API等功能。</p>
+      </div>
+
+      <h2>技术方案</h2>
+      <table>
+        <tr><th>项目</th><th>技术选型</th></tr>
+        <tr><td>后端框架</td><td>Node.js + Express</td></tr>
+        <tr><td>数据库</td><td>MongoDB</td></tr>
+        <tr><td>模板引擎</td><td>EJS (前后端不分离)</td></tr>
+        <tr><td>认证方式</td><td>JWT + Session</td></tr>
+        <tr><td>文件上传</td><td>Multer</td></tr>
+      </table>
+
+      <h2>功能模块</h2>
+
+      <h3>1. 用户认证系统</h3>
+      <span class="status status-done">已完成</span>
+      <ul>
+        <li>用户注册 (用户名、邮箱、密码)</li>
+        <li>用户登录 (JWT Token + Session)</li>
+        <li>退出登录</li>
+        <li>登录限流保护</li>
+      </ul>
+
+      <h3>2. 文件上传</h3>
+      <span class="status status-done">已完成</span>
+      <ul>
+        <li>单文件/多文件上传</li>
+        <li>上传进度条显示</li>
+        <li>存储配额限制</li>
+        <li>文件夹归属</li>
+      </ul>
+
+      <h3>3. 文件安全过滤</h3>
+      <span class="status status-done">已完成</span>
+      <p>禁止上传以下类型的危险文件:</p>
+      <pre>脚本类: .js, .ts, .py, .php, .asp, .jsp, .rb, .sh, .bat
+可执行: .exe, .dll, .com, .scr, .msi, .vbs
+其他: .htaccess, .sql, .reg</pre>
+
+      <h3>4. 文件浏览器</h3>
+      <span class="status status-done">已完成</span>
+      <ul>
+        <li>仿Windows文件浏览器风格</li>
+        <li>网格视图/列表视图切换</li>
+        <li>文件夹导航(面包屑)</li>
+        <li>文件/文件夹图标</li>
+        <li>PC端和移动端响应式适配</li>
+      </ul>
+
+      <h3>5. 文件夹管理</h3>
+      <span class="status status-done">已完成</span>
+      <ul>
+        <li>创建文件夹</li>
+        <li>重命名文件夹</li>
+        <li>删除文件夹(含内部文件)</li>
+        <li>层级目录结构</li>
+      </ul>
+
+      <h3>6. 开放API</h3>
+      <span class="status status-done">已完成</span>
+      <table class="api-table">
+        <tr><th>方法</th><th>路径</th><th>说明</th></tr>
+        <tr><td>POST</td><td>/api/v1/auth/token</td><td>获取API Token</td></tr>
+        <tr><td>POST</td><td>/api/v1/files/upload</td><td>上传文件</td></tr>
+        <tr><td>GET</td><td>/api/v1/files</td><td>获取文件列表</td></tr>
+        <tr><td>GET</td><td>/api/v1/files/:id/info</td><td>获取文件信息</td></tr>
+        <tr><td>GET</td><td>/api/v1/files/:id/download</td><td>下载文件</td></tr>
+        <tr><td>DELETE</td><td>/api/v1/files/:id</td><td>删除文件</td></tr>
+      </table>
+
+      <h2>数据库模型</h2>
+
+      <h3>User (用户)</h3>
+      <pre><code>username: String (唯一)
+email: String (唯一)
+password: String (加密存储)
+apiToken: String
+apiTokenExpires: Date
+storageQuota: Number (默认1GB)
+storageUsed: Number
+isActive: Boolean
+lastLogin: Date</code></pre>
+
+      <h3>File (文件)</h3>
+      <pre><code>filename: String (存储文件名)
+originalName: String (原始文件名)
+mimeType: String
+extension: String
+size: Number
+storage.path: String (文件路径)
+folder: ObjectId (所属文件夹)
+owner: ObjectId (所有者用户)
+upload.complete: Boolean
+stats.downloads: Number
+isDeleted: Boolean (软删除)</code></pre>
+
+      <h3>Folder (文件夹)</h3>
+      <pre><code>name: String
+parent: ObjectId (父文件夹)
+owner: ObjectId (所有者)
+path: String (路径)
+depth: Number (层级)
+isDeleted: Boolean</code></pre>
+
+      <h2>项目结构</h2>
+      <div class="files-grid">
+        <div class="file-item">server.js</div>
+        <div class="file-item">package.json</div>
+        <div class="file-item">.env</div>
+        <div class="file-item">app/models/User.js</div>
+        <div class="file-item">app/models/File.js</div>
+        <div class="file-item">app/models/Folder.js</div>
+        <div class="file-item">app/controllers/*</div>
+        <div class="file-item">app/routes/*</div>
+        <div class="file-item">app/middlewares/*</div>
+        <div class="file-item">app/views/**/*.ejs</div>
+        <div class="file-item">app/public/css/*</div>
+        <div class="file-item">app/public/js/*</div>
+      </div>
+
+      <h2>启动方式</h2>
+      <pre><code># 安装依赖
+npm install
+
+# 开发模式
+npm run dev
+
+# 生产模式
+npm start</code></pre>
+
+      <h2>验证清单</h2>
+      <ul class="checklist">
+        <li>注册账号并登录</li>
+        <li>上传普通文件(图片/文档)，验证进度条</li>
+        <li>尝试上传 .js 文件，验证被拦截</li>
+        <li>文件浏览器浏览/下载</li>
+        <li>创建文件夹，导航层级</li>
+        <li>申请API Token，使用API上传/下载</li>
+        <li>移动端适配测试</li>
+      </ul>
+
+    </div>
+  </div>
+</body>
+</html>

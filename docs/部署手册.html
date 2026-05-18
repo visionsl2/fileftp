@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>FileFTP - 部署手册</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f5f5; color: #333; line-height: 1.8; padding: 20px; }
+    .container { max-width: 1100px; margin: 0 auto; background: white; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.08); overflow: hidden; }
+    .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 40px; }
+    .header h1 { font-size: 32px; margin-bottom: 8px; }
+    .content { padding: 40px; }
+    h2 { color: #667eea; font-size: 22px; margin: 32px 0 16px; padding-bottom: 8px; border-bottom: 2px solid #f0f0f0; }
+    h3 { font-size: 18px; color: #555; margin: 24px 0 12px; }
+    p { margin: 10px 0; color: #555; }
+    ul, ol { margin: 10px 0 10px 24px; color: #555; }
+    li { margin: 8px 0; }
+    code { background: #f5f5f5; padding: 2px 8px; border-radius: 4px; font-family: 'Consolas', monospace; font-size: 13px; color: #667eea; }
+    pre { background: #2d2d2d; color: #f8f8f2; padding: 16px 20px; border-radius: 8px; overflow-x: auto; margin: 16px 0; font-size: 13px; line-height: 1.6; }
+    pre code { background: none; padding: 0; color: inherit; }
+    .card { background: #f8f9fa; padding: 20px; border-radius: 8px; margin: 16px 0; }
+    .tip { background: #e8f4fd; border-left: 4px solid #2196F3; padding: 12px 16px; margin: 12px 0; border-radius: 0 8px 8px 0; }
+    .warning { background: #fff3cd; border-left: 4px solid #ffc107; padding: 12px 16px; margin: 12px 0; border-radius: 0 8px 8px 0; }
+    .success { background: #d4edda; border-left: 4px solid #28a745; padding: 12px 16px; margin: 12px 0; border-radius: 0 8px 8px 0; }
+    table { width: 100%; border-collapse: collapse; margin: 16px 0; }
+    th, td { padding: 12px 16px; text-align: left; border-bottom: 1px solid #eee; }
+    th { background: #f8f9fa; font-weight: 600; }
+    .env-example { background: #f8f9fa; padding: 16px; border-radius: 8px; margin: 12px 0; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>FileFTP 部署手册</h1>
+      <p>从零开始在服务器上部署 FileFTP 系统</p>
+      <div style="margin-top:12px"><span style="background:rgba(255,255,255,0.2);padding:4px 12px;border-radius:12px;font-size:12px">V1.0</span></div>
+    </div>
+
+    <div class="content">
+      <h2>1. 环境要求</h2>
+
+      <div class="card">
+        <h3>软件依赖</h3>
+        <table>
+          <tr><th>软件</th><th>最低版本</th><th>说明</th></tr>
+          <tr><td>Node.js</td><td>16.x 或更高</td><td>JavaScript 运行时</td></tr>
+          <tr><td>MongoDB</td><td>4.4 或更高</td><td>数据库服务</td></tr>
+          <tr><td>npm</td><td>8.x 或更高</td><td>包管理器（Node.js自带）</td></tr>
+        </table>
+      </div>
+
+      <div class="tip">
+        <strong>推荐环境：</strong> Ubuntu 22.04 / CentOS 8 / Windows Server 2019
+      </div>
+
+      <h2>2. 安装步骤</h2>
+
+      <h3>2.1 安装 Node.js</h3>
+
+      <h4>Ubuntu / Debian</h4>
+      <pre><code># 使用 NodeSource 安装 Node.js 18.x
+curl -fsSL https://deb.nodesource.com/setup_18.x | sudo -E bash -
+sudo apt-get install -y nodejs
+
+# 验证安装
+node --version
+npm --version</code></pre>
+
+      <h4>CentOS / RHEL</h4>
+      <pre><code># 使用 NodeSource 安装 Node.js 18.x
+curl -fsSL https://rpm.nodesource.com/setup_18.x | sudo bash -
+sudo yum install -y nodejs
+
+# 验证安装
+node --version
+npm --version</code></pre>
+
+      <h4>Windows</h4>
+      <p>从 <a href="https://nodejs.org/" target="_blank">Node.js 官网</a> 下载安装包，一路下一步安装即可。</p>
+
+      <h3>2.2 安装 MongoDB</h3>
+
+      <h4>Ubuntu</h4>
+      <pre><code># 导入 MongoDB GPG 密钥
+wget -qO - https://www.mongodb.org/static/pgp/server-6.0.asc | sudo apt-key add -
+
+# 添加 MongoDB 源
+echo "deb [ arch=amd64,arm64 ] https://repo.mongodb.org/apt/ubuntu focal/mongodb-org/6.0 multiverse" | sudo tee /etc/apt/sources.list.d/mongodb-org-6.0.list
+
+# 安装 MongoDB
+sudo apt-get update
+sudo apt-get install -y mongodb-org
+
+# 启动 MongoDB
+sudo systemctl start mongod
+sudo systemctl enable mongod</code></pre>
+
+      <h4>Windows</h4>
+      <p>从 <a href="https://www.mongodb.com/try/download/community" target="_blank">MongoDB 下载中心</a> 下载 MSI 安装包，安装为 Windows 服务。</p>
+
+      <h3>2.3 部署应用</h3>
+
+      <div class="step">
+        <h4>步骤 1: 获取代码</h4>
+        <pre><code># 克隆或下载项目代码
+git clone &lt;repository-url&gt; /path/to/fileftp
+cd /path/to/fileftp</code></pre>
+      </div>
+
+      <div class="step">
+        <h4>步骤 2: 安装依赖</h4>
+        <pre><code>npm install</code></pre>
+      </div>
+
+      <div class="step">
+        <h4>步骤 3: 配置环境变量</h4>
+        <p>创建 <code>.env</code> 文件：</p>
+        <div class="env-example">
+          <pre><code># 服务配置
+PORT=3000
+NODE_ENV=production
+
+# MongoDB配置
+MONGODB_URI=mongodb://localhost:27017/fileftp
+
+# JWT配置（请修改为随机字符串）
+JWT_SECRET=your-super-secret-key-change-this
+JWT_EXPIRES_IN=7d
+
+# 上传配置
+UPLOAD_DIR=./uploads
+MAX_FILE_SIZE=104857600
+MAX_CHUNK_SIZE=5242880
+MAX_FILES_PER_REQUEST=10
+
+# 存储配额（字节）
+DEFAULT_STORAGE_QUOTA=1073741824
+
+# Session配置（请修改为随机字符串）
+SESSION_SECRET=session-secret-change-this</code></pre>
+        </div>
+      </div>
+
+      <div class="step">
+        <h4>步骤 4: 创建上传目录</h4>
+        <pre><code>mkdir -p uploads
+chmod 755 uploads</code></pre>
+      </div>
+
+      <div class="step">
+        <h4>步骤 5: 启动服务</h4>
+        <pre><code># 开发模式
+npm run dev
+
+# 生产模式
+npm start</code></pre>
+      </div>
+
+      <div class="success">
+        <strong>启动成功！</strong> 访问 http://localhost:3000 查看应用。
+      </div>
+
+      <h2>3. 生产环境配置</h2>
+
+      <h3>3.1 使用 PM2 进程管理器</h3>
+
+      <pre><code># 安装 PM2
+npm install -g pm2
+
+# 启动应用
+pm2 start server.js --name fileftp
+
+# 设置开机自启
+pm2 save
+pm2 startup
+
+# 查看状态
+pm2 status fileftp
+
+# 查看日志
+pm2 logs fileftp</code></pre>
+
+      <h3>3.2 Nginx 反向代理配置</h3>
+
+      <pre><code># /etc/nginx/sites-available/fileftp
+server {
+    listen 80;
+    server_name your-domain.com;
+
+    client_max_body_size 100M;  # 最大上传100MB
+
+    location / {
+        proxy_pass http://127.0.0.1:3000;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_cache_bypass $http_upgrade;
+    }
+}</code></pre>
+
+      <div class="warning">
+        <strong>HTTPS 配置：</strong> 生产环境务必配置 HTTPS，可使用 Let's Encrypt 免费证书。
+      </div>
+
+      <h3>3.3 配置 MongoDB 认证（推荐）</h3>
+
+      <pre><code># 连接到 MongoDB
+mongosh
+
+# 切换到 admin 数据库
+use admin
+
+# 创建管理员账号
+db.createUser({
+  user: "admin",
+  pwd: "your-password",
+  roles: [{ role: "root", db: "admin" }]
+})
+
+# 退出
+exit
+
+# 修改 /etc/mongod.conf 启用认证
+# security:
+#   authorization: enabled
+
+# 重启 MongoDB
+sudo systemctl restart mongod
+
+# 更新 .env 中的连接字符串
+MONGODB_URI=mongodb://admin:your-password@localhost:27017/fileftp?authSource=admin</code></pre>
+
+      <h2>4. 防火墙配置</h2>
+
+      <pre><code># Ubuntu (UFW)
+sudo ufw allow 22/tcp    # SSH
+sudo ufw allow 80/tcp    # HTTP
+sudo ufw allow 443/tcp   # HTTPS
+sudo ufw enable
+
+# CentOS (firewalld)
+sudo firewall-cmd --permanent --add-port=22/tcp
+sudo firewall-cmd --permanent --add-port=80/tcp
+sudo firewall-cmd --permanent --add-port=443/tcp
+sudo firewall-cmd --reload</code></pre>
+
+      <h2>5. 目录权限</h2>
+
+      <pre><code># 设置上传目录权限
+chown -R www-data:www-data /path/to/fileftp/uploads
+chmod -R 755 /path/to/fileftp/uploads
+
+# 如果使用 PM2
+chown -R $USER:$USER /path/to/fileftp</code></pre>
+
+      <h2>6. 备份策略</h2>
+
+      <h3>6.1 备份 MongoDB 数据</h3>
+
+      <pre><code># 创建备份脚本 /opt/backup/mongodb-backup.sh
+#!/bin/bash
+DATE=$(date +%Y%m%d_%H%M%S)
+BACKUP_DIR=/opt/backup/mongodb
+mongodump --out=$BACKUP_DIR/backup_$DATE
+
+# 保留最近7天的备份
+find $BACKUP_DIR -type d -mtime +7 -exec rm -rf {} \;
+
+# 添加定时任务
+crontab -e
+# 每天凌晨3点执行备份
+0 3 * * * /opt/backup/mongodb-backup.sh</code></pre>
+
+      <h3>6.2 备份上传文件</h3>
+
+      <pre><code># 创建备份脚本 /opt/backup/files-backup.sh
+#!/bin/bash
+DATE=$(date +%Y%m%d_%H%M%S)
+tar -czf /opt/backup/files/files_$DATE.tar.gz /path/to/fileftp/uploads
+
+# 保留最近7天的备份
+find /opt/backup/files -type f -mtime +7 -delete</code></pre>
+
+      <h2>7. 监控与日志</h2>
+
+      <h3>7.1 PM2 日志管理</h3>
+
+      <pre><code># 查看实时日志
+pm2 logs fileftp --lines 100
+
+# 日志分割（安装 pm2-logrotate）
+pm2 install pm2-logrotate
+pm2 set pm2-logrotate:max_size 10M
+pm2 set pm2-logrotate:retain 7</code></pre>
+
+      <h3>7.2 Nginx 日志轮转</h3>
+
+      <pre><code># /etc/logrotate.d/nginx 配置已自动处理</code></pre>
+
+      <h2>8. 故障排查</h2>
+
+      <table>
+        <tr><th>问题</th><th>解决方案</th></tr>
+        <tr><td>端口被占用</td><td>修改 .env 中的 PORT，或 kill 占用进程</td></tr>
+        <tr><td>MongoDB 连接失败</td><td>检查 MongoDB 服务状态和连接字符串</td></tr>
+        <tr><td>上传文件失败</td><td>检查 uploads 目录权限</td></tr>
+        <tr><td>502 Bad Gateway</td><td>检查 Nginx 配置和后端服务状态</td></tr>
+        <tr><td>内存溢出</td><td>增加 Node.js 内存限制：node --max-old-space-size=2048 server.js</td></tr>
+      </table>
+
+      <h2>9. 环境变量参考</h2>
+
+      <table>
+        <tr><th>变量名</th><th>默认值</th><th>说明</th></tr>
+        <tr><td>PORT</td><td>3000</td><td>服务端口</td></tr>
+        <tr><td>NODE_ENV</td><td>development</td><td>环境模式</td></tr>
+        <tr><td>MONGODB_URI</td><td>mongodb://localhost:27017/fileftp</td><td>数据库连接</td></tr>
+        <tr><td>JWT_SECRET</td><td>-</td><td>JWT签名密钥（必填）</td></tr>
+        <tr><td>JWT_EXPIRES_IN</td><td>7d</td><td>Token有效期</td></tr>
+        <tr><td>UPLOAD_DIR</td><td>./uploads</td><td>上传目录</td></tr>
+        <tr><td>MAX_FILE_SIZE</td><td>104857600</td><td>最大文件大小(100MB)</td></tr>
+        <tr><td>MAX_CHUNK_SIZE</td><td>5242880</td><td>分片大小(5MB)</td></tr>
+        <tr><td>MAX_FILES_PER_REQUEST</td><td>10</td><td>每次最多上传文件数</td></tr>
+        <tr><td>DEFAULT_STORAGE_QUOTA</td><td>1073741824</td><td>用户存储配额(1GB)</td></tr>
+        <tr><td>SESSION_SECRET</td><td>-</td><td>Session密钥（必填）</td></tr>
+      </table>
+
+    </div>
+  </div>
+</body>
+</html>

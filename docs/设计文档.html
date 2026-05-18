@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>FileFTP - 设计文档</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f5f5; color: #333; line-height: 1.8; padding: 20px; }
+    .container { max-width: 1100px; margin: 0 auto; background: white; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.08); overflow: hidden; }
+    .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 40px; }
+    .header h1 { font-size: 32px; margin-bottom: 8px; }
+    .header .subtitle { opacity: 0.9; }
+    .content { padding: 40px; }
+    h2 { color: #667eea; font-size: 22px; margin: 32px 0 16px; padding-bottom: 8px; border-bottom: 2px solid #f0f0f0; }
+    h3 { font-size: 16px; color: #555; margin: 20px 0 12px; }
+    h4 { font-size: 14px; color: #666; margin: 16px 0 8px; }
+    p { margin: 10px 0; color: #555; }
+    ul, ol { margin: 10px 0 10px 24px; color: #555; }
+    li { margin: 6px 0; }
+    code { background: #f5f5f5; padding: 2px 8px; border-radius: 4px; font-family: 'Consolas', monospace; font-size: 13px; color: #667eea; }
+    pre { background: #2d2d2d; color: #f8f8f2; padding: 16px 20px; border-radius: 8px; overflow-x: auto; margin: 16px 0; font-size: 13px; line-height: 1.6; }
+    pre code { background: none; padding: 0; color: inherit; }
+    table { width: 100%; border-collapse: collapse; margin: 16px 0; }
+    th, td { padding: 12px 16px; text-align: left; border-bottom: 1px solid #eee; }
+    th { background: #f8f9fa; font-weight: 600; color: #333; }
+    tr:hover td { background: #fafafa; }
+    .diagram { background: #f8f9fa; padding: 20px; border-radius: 8px; margin: 16px 0; text-align: center; }
+    .badge { display: inline-block; padding: 4px 12px; border-radius: 12px; font-size: 12px; font-weight: 500; }
+    .badge-primary { background: #667eea; color: white; }
+    .section { margin: 24px 0; padding: 20px; background: #fafafa; border-radius: 8px; }
+    .file-structure { font-family: monospace; font-size: 13px; }
+    .indent { padding-left: 20px; color: #999; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>FileFTP 设计文档</h1>
+      <p class="subtitle">文件上传下载浏览系统 - 技术架构与设计说明</p>
+      <div style="margin-top:12px"><span style="background:rgba(255,255,255,0.2);padding:4px 12px;border-radius:12px;font-size:12px">V1.0</span></div>
+    </div>
+
+    <div class="content">
+      <h2>1. 系统概述</h2>
+
+      <div class="section">
+        <p>FileFTP 是一个基于 Node.js + Express + MongoDB 的文件管理系统，提供以下核心功能：</p>
+        <ul>
+          <li><strong>用户认证</strong> - 注册、登录、登出，支持 JWT Token 和 Session 双重认证</li>
+          <li><strong>文件上传</strong> - 单文件/多文件上传，实时进度显示，支持大文件分片上传</li>
+          <li><strong>文件下载</strong> - 流式传输，支持中文文件名，RFC 5987标准编码</li>
+          <li><strong>文件浏览</strong> - 仿Windows资源管理器风格，网格/列表视图切换</li>
+          <li><strong>文件夹管理</strong> - 创建、重命名、删除，支持层级目录结构</li>
+          <li><strong>数据隔离</strong> - 用户只能访问自己的文件，确保隐私安全</li>
+          <li><strong>安全过滤</strong> - 黑名单机制，禁止上传危险文件类型</li>
+          <li><strong>开放API</strong> - RESTful API，支持第三方系统集成</li>
+        </ul>
+      </div>
+
+      <h2>2. 技术架构</h2>
+
+      <h3>2.1 技术栈</h3>
+      <table>
+        <tr><th>层级</th><th>技术选型</th><th>说明</th></tr>
+        <tr><td>运行环境</td><td>Node.js</td><td>基于 Chrome V8 引擎</td></tr>
+        <tr><td>Web框架</td><td>Express.js</td><td>轻量级 Web 应用框架</td></tr>
+        <tr><td>数据库</td><td>MongoDB</td><td>NoSQL文档数据库</td></tr>
+        <tr><td>模板引擎</td><td>EJS</td><td>嵌入式 JavaScript 模板</td></tr>
+        <tr><td>认证方式</td><td>JWT + Session</td><td>令牌认证与会话管理</td></tr>
+        <tr><td>文件上传</td><td>Formidable</td><td>处理 multipart/form-data</td></tr>
+        <tr><td>密码加密</td><td>bcryptjs</td><td>单向哈希加密</td></tr>
+      </table>
+
+      <h3>2.2 系统架构图</h3>
+      <div class="diagram">
+        <pre style="background: #f8f9fa; color: #333; text-align: left;">
+┌─────────────────────────────────────────────────────────────┐
+│                        客户端层                              │
+│  ┌─────────┐  ┌─────────┐  ┌─────────┐  ┌─────────┐         │
+│  │ Web浏览器 │  │  移动端  │  │ API调用  │  │ 其他系统 │         │
+│  └────┬────┘  └────┬────┘  └────┬────┘  └────┬────┘         │
+└───────┼────────────┼────────────┼────────────┼──────────────┘
+        │            │            │            │
+        └────────────┴─────┬──────┴────────────┘
+                          │ HTTP/HTTPS
+┌─────────────────────────┴───────────────────────────────────┐
+│                        服务端层                               │
+│  ┌─────────────────────────────────────────────────────┐    │
+│  │                    Express.js                         │    │
+│  │  ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌─────────┐   │    │
+│  │  │ 路由层   │ │中间件层 │ │控制器层 │ │服务层   │   │    │
+│  │  └─────────┘ └─────────┘ └─────────┘ └─────────┘   │    │
+│  └─────────────────────────────────────────────────────┘    │
+│                          │                                  │
+│  ┌───────────────────────┼───────────────────────────────┐ │
+│  │                  数据存储层                             │ │
+│  │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐   │ │
+│  │  │   MongoDB   │  │   文件系统   │  │   缓存      │   │ │
+│  │  │  (元数据)   │  │  (物理文件)  │  │  (Session)  │   │ │
+│  │  └─────────────┘  └─────────────┘  └─────────────┘   │ │
+│  └───────────────────────────────────────────────────────┘ │
+└───────────────────────────────────────────────────────────┘
+        </pre>
+      </div>
+
+      <h2>3. 数据库设计</h2>
+
+      <h3>3.1 数据模型概览</h3>
+      <table>
+        <tr><th>模型</th><th>集合名</th><th>说明</th><th>关联</th></tr>
+        <tr><td>User</td><td>users</td><td>用户账户信息</td><td>-</td></tr>
+        <tr><td>File</td><td>files</td><td>文件元数据</td><td>owner → User, folder → Folder</td></tr>
+        <tr><td>Folder</td><td>folders</td><td>文件夹目录</td><td>owner → User, parent → Folder</td></tr>
+      </table>
+
+      <h3>3.2 User 用户模型</h3>
+      <pre><code>User {
+  _id: ObjectId,
+  username: String,          // 用户名（唯一）
+  email: String,             // 邮箱（唯一）
+  password: String,          // 密码（bcrypt加密）
+  apiToken: String,          // API访问令牌
+  apiTokenExpires: Date,     // API Token过期时间
+  storageQuota: Number,      // 存储配额（默认1GB）
+  storageUsed: Number,       // 已使用空间
+  isActive: Boolean,         // 账号状态
+  lastLogin: Date,           // 最后登录时间
+  createdAt: Date,           // 创建时间
+  updatedAt: Date            // 更新时间
+}</code></pre>
+
+      <h3>3.3 File 文件模型</h3>
+      <pre><code>File {
+  _id: ObjectId,
+  filename: String,          // 存储文件名（唯一）
+  originalName: String,        // 原始文件名
+  mimeType: String,           // MIME类型
+  extension: String,          // 文件扩展名
+  size: Number,               // 文件大小（字节）
+  storage: {
+    path: String              // 物理文件路径
+  },
+  folder: ObjectId,          // 所属文件夹（null为根目录）
+  owner: ObjectId,           // 所有者（必填，数据隔离）
+  upload: {
+    complete: Boolean,        // 是否完成
+    chunksTotal: Number,      // 总分片数
+    chunksUploaded: Number     // 已上传分片数
+  },
+  stats: {
+    downloads: Number,        // 下载次数
+    lastDownload: Date        // 最后下载时间
+  },
+  isDeleted: Boolean,         // 软删除标志
+  deletedAt: Date,            // 删除时间
+  createdAt: Date,
+  updatedAt: Date
+}</code></pre>
+
+      <h3>3.4 Folder 文件夹模型</h3>
+      <pre><code>Folder {
+  _id: ObjectId,
+  name: String,               // 文件夹名称
+  parent: ObjectId,          // 父文件夹（null为根目录）
+  owner: ObjectId,            // 所有者
+  path: String,               // 完整路径（如 /images/photos）
+  depth: Number,              // 层级深度（根=0）
+  order: Number,              // 排序权重
+  isDeleted: Boolean,         // 软删除标志
+  createdAt: Date,
+  updatedAt: Date
+}</code></pre>
+
+      <h2>4. 安全机制</h2>
+
+      <h3>4.1 认证机制</h3>
+      <div class="section">
+        <p><strong>多方式认证支持：</strong></p>
+        <ol>
+          <li><strong>Bearer Token</strong> - Authorization: Bearer &lt;token&gt;</li>
+          <li><strong>Cookie</strong> - 自动读取 token cookie</li>
+          <li><strong>Session</strong> - 基于 express-session</li>
+        </ol>
+        <p><strong>JWT 配置：</strong></p>
+        <ul>
+          <li>签名算法：HS256</li>
+          <li>过期时间：7天（可配置）</li>
+          <li>存储内容：userId, username</li>
+        </ul>
+      </div>
+
+      <h3>4.2 文件安全过滤</h3>
+      <p>系统采用黑名单机制，禁止上传以下危险文件类型：</p>
+      <table>
+        <tr><th>类别</th><th>扩展名</th></tr>
+        <tr><td>脚本语言</td><td>.js, .ts, .py, .php, .asp, .jsp, .rb, .pl</td></tr>
+        <tr><td>Shell脚本</td><td>.sh, .bash, .zsh, .bat, .cmd, .ps1</td></tr>
+        <tr><td>可执行文件</td><td>.exe, .dll, .com, .scr, .msi, .vbs</td></tr>
+        <tr><td>服务器配置</td><td>.htaccess, .htpasswd, .sql, .reg</td></tr>
+        <tr><td>其他</td><td>.jar, .war, .go, .rs, .c, .cpp</td></tr>
+      </table>
+
+      <h3>4.3 数据隔离</h3>
+      <p>每个用户只能访问自己的文件：</p>
+      <pre><code>// 所有查询都强制添加owner条件
+File.find({ owner: userId, ... })
+Folder.find({ owner: userId, ... })</code></pre>
+
+      <h2>5. API 设计</h2>
+
+      <h3>5.1 Web端路由</h3>
+      <table>
+        <tr><th>方法</th><th>路径</th><th>说明</th><th>认证</th></tr>
+        <tr><td>GET</td><td>/auth/login</td><td>登录页</td><td>-</td></tr>
+        <tr><td>GET</td><td>/auth/register</td><td>注册页</td><td>-</td></tr>
+        <tr><td>POST</td><td>/auth/register</td><td>注册</td><td>-</td></tr>
+        <tr><td>POST</td><td>/auth/login</td><td>登录</td><td>-</td></tr>
+        <tr><td>GET</td><td>/auth/logout</td><td>登出</td><td>✓</td></tr>
+        <tr><td>GET</td><td>/files</td><td>文件列表</td><td>✓</td></tr>
+        <tr><td>POST</td><td>/files/upload</td><td>上传文件</td><td>✓</td></tr>
+        <tr><td>GET</td><td>/files/:id/download</td><td>下载文件</td><td>✓</td></tr>
+        <tr><td>DELETE</td><td>/files/:id</td><td>删除文件</td><td>✓</td></tr>
+        <tr><td>POST</td><td>/folders</td><td>创建文件夹</td><td>✓</td></tr>
+        <tr><td>PUT</td><td>/folders/:id</td><td>重命名</td><td>✓</td></tr>
+        <tr><td>DELETE</td><td>/folders/:id</td><td>删除文件夹</td><td>✓</td></tr>
+      </table>
+
+      <h3>5.2 开放API路由</h3>
+      <table>
+        <tr><th>方法</th><th>路径</th><th>说明</th><th>认证</th></tr>
+        <tr><td>POST</td><td>/api/v1/auth/token</td><td>获取API Token</td><td>用户名+密码</td></tr>
+        <tr><td>POST</td><td>/api/v1/files/upload</td><td>上传文件</td><td>X-API-Token</td></tr>
+        <tr><td>GET</td><td>/api/v1/files</td><td>文件列表</td><td>X-API-Token</td></tr>
+        <tr><td>GET</td><td>/api/v1/files/:id/info</td><td>文件信息</td><td>X-API-Token</td></tr>
+        <tr><td>GET</td><td>/api/v1/files/:id/download</td><td>下载文件</td><td>X-API-Token</td></tr>
+        <tr><td>DELETE</td><td>/api/v1/files/:id</td><td>删除文件</td><td>X-API-Token</td></tr>
+      </table>
+
+      <h2>6. 项目结构</h2>
+      <div class="file-structure">
+        <pre><code>fileftp/
+        ├── server.js                    # 服务器入口
+        ├── package.json                 # 依赖配置
+        ├── .env                         # 环境变量
+        ├── app/
+        │   ├── config/                 # 配置文件
+        │   │   ├── auth.js              # JWT配置
+        │   │   ├── database.js         # 数据库连接
+        │   │   └── upload.js           # 上传配置
+        │   ├── controllers/             # 控制器
+        │   │   ├── authController.js    # 认证
+        │   │   ├── fileController.js   # 文件操作
+        │   │   ├── folderController.js # 文件夹操作
+        │   │   └── apiController.js    # 开放API
+        │   ├── models/                 # 数据模型
+        │   │   ├── User.js
+        │   │   ├── File.js
+        │   │   └── Folder.js
+        │   ├── routes/                 # 路由定义
+        │   │   ├── authRoutes.js
+        │   │   ├── fileRoutes.js
+        │   │   ├── folderRoutes.js
+        │   │   └── apiRoutes.js
+        │   ├── middlewares/            # 中间件
+        │   │   ├── authMiddleware.js   # 认证中间件
+        │   │   ├── fileFilter.js       # 文件过滤
+        │   │   ├── rateLimiter.js      # 限流
+        │   │   └── uploadMiddleware.js # 上传处理
+        │   ├── services/               # 服务层
+        │   │   └── storageService.js   # 存储服务
+        │   ├── utils/                  # 工具函数
+        │   │   └── helpers.js          # 视图辅助函数
+        │   ├── views/                  # EJS模板
+        │   │   ├── auth/
+        │   │   │   ├── login.ejs
+        │   │   │   └── register.ejs
+        │   │   ├── files/
+        │   │   │   └── browser.ejs     # 文件浏览器
+        │   │   └── 404.ejs
+        │   └── public/                 # 静态资源
+        │       ├── css/
+        │       │   ├── auth.css
+        │       │   └── filebrowser.css
+        │       └── js/
+        │           └── filebrowser.js
+        ├── uploads/                    # 文件存储目录
+        └── docs/                      # 文档
+            ├── 设计文档.html
+            ├── 操作手册.html
+            ├── 部署手册.html
+            └── API手册.html</code></pre>
+      </div>
+
+      <h2>7. 版本信息
+      <tr><td>V1.0</td><td>2026-05-18</td><td>初始版本</td></tr></h2>
+      <table>
+        <tr><th>版本</th><th>日期</th><th>更新内容</th></tr>
+        <tr><td>1.0.0</td><td>2026-05-18</td><td>初始版本，包含核心功能</td></tr>
+      </table>
+    </div>
+  </div>
+</body>
+</html>
