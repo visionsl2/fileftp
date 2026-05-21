@@ -1,55 +1,49 @@
 /**
  * 上传配置
- *
- * 配置说明：
- * - UPLOAD_DIR: 文件存储根目录，支持任意磁盘路径
- *   Windows示例: D:/uploads 或 E:\\FileFTP\\uploads
- *   Linux示例: /home/user/uploads 或 ./uploads
+ * 
+ * UPLOAD_DIR: 文件存储根目录，支持任意磁盘路径
  */
 
 const path = require('path');
 const fs = require('fs');
 
-// 获取上传目录配置
+console.log('[upload.js] 开始加载, process.env.UPLOAD_DIR =', process.env.UPLOAD_DIR);
+
 function getUploadDir() {
   const uploadDir = process.env.UPLOAD_DIR || './uploads';
-
-  // 转换为绝对路径
-  let absolutePath;
+  let result;
   if (path.isAbsolute(uploadDir)) {
-    absolutePath = uploadDir;
+    result = uploadDir;
   } else {
-    absolutePath = path.resolve(uploadDir);
+    result = path.resolve(uploadDir);
   }
-
-  // 统一路径分隔符（用于显示和存储）
-  return absolutePath.replace(/\\/g, '/');
+  // 统一路径分隔符
+  result = result.replace(/\\/g, '/');
+  console.log('[upload.js] getUploadDir() 返回 =', result);
+  return result;
 }
 
-// 确保上传目录存在
 function ensureUploadDir() {
-  const uploadDir = getUploadDir();
-  if (!fs.existsSync(uploadDir)) {
+  const dir = getUploadDir();
+  if (!fs.existsSync(dir)) {
     try {
-      fs.mkdirSync(uploadDir, { recursive: true });
-      console.log(`Upload directory created: ${uploadDir}`);
-    } catch (error) {
-      console.error(`Failed to create upload directory: ${uploadDir}`, error.message);
-      throw error;
+      fs.mkdirSync(dir, { recursive: true });
+      console.log('[upload.js] 目录已创建:', dir);
+    } catch (e) {
+      console.error('[upload.js] 创建目录失败:', e.message);
     }
   }
 }
 
-// 启动时验证
-try {
-  ensureUploadDir();
-} catch (error) {
-  console.warn('Warning: Upload directory not available. Will be created on first upload.');
-}
+ensureUploadDir();
 
-module.exports = {
+const config = {
   uploadDir: getUploadDir(),
   maxFileSize: parseInt(process.env.MAX_FILE_SIZE) || 1024 * 1024 * 1024,
   maxChunkSize: parseInt(process.env.MAX_CHUNK_SIZE) || 5 * 1024 * 1024,
   maxFilesPerRequest: parseInt(process.env.MAX_FILES_PER_REQUEST) || 10
 };
+
+console.log('[upload.js] 最终 uploadDir =', config.uploadDir);
+
+module.exports = config;

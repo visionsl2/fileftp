@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pkill -f node)",
+      "Bash(rm -rf C:/sl/code/nodejs/fileftp/uploads/*)",
+      "Bash(node server.js)",
+      "Bash(curl -s http://localhost:3002/auth/login)",
+      "Bash(node -e ' *)"
+    ]
+  }
+}
