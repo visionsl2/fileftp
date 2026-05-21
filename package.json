@@ -1,6 +1,6 @@
 {
   "name": "fileftp",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "文件上传下载浏览系统",
   "main": "server.js",
   "scripts": {
@@ -29,7 +29,8 @@
     "formidable": "2.1.1",
     "jsonwebtoken": "9.0.0",
     "mongoose": "6.11.0",
-    "multer": "1.4.4"
+    "multer": "1.4.4",
+    "sharp": "^0.34.5"
   },
   "devDependencies": {
     "@babel/cli": "7.28.6",

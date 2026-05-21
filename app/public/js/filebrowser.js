@@ -7,6 +7,7 @@ class FileBrowser {
   constructor() {
     this.currentFolder = document.querySelector('input[name="folder"]')?.value || '';
     this.viewMode = localStorage.getItem('viewMode') || 'grid';
+    this.selectedFiles = new Set();
     this.init();
   }
 
@@ -16,8 +17,12 @@ class FileBrowser {
     this.bindFolderEvents();
     this.bindFileEvents();
     this.bindRefreshEvent();
+    this.bindSelectionEvents();
+    this.bindBatchActions();
+    this.bindDragMove();
     this.initDragDrop();
     this.initImagePreview();
+    this.initModals();
     this.applyViewMode();
   }
 
@@ -56,9 +61,9 @@ class FileBrowser {
   }
 
   bindFolderEvents() {
-    // 单击打开文件夹
     document.querySelectorAll('.folder-item').forEach(item => {
-      item.addEventListener('click', () => {
+      item.addEventListener('click', (e) => {
+        if (e.target.classList.contains('action-btn') || e.target.closest('.action-btn')) return;
         const folderId = item.dataset.id;
         this.navigateToFolder(folderId);
       });
@@ -68,7 +73,7 @@ class FileBrowser {
       btn.addEventListener('click', (e) => {
         e.stopPropagation();
         const folderId = btn.dataset.id;
-        this.renameFolder(folderId);
+        this.showRenameModal('folder', folderId, btn.closest('.folder-item').querySelector('.file-name')?.textContent || '');
       });
     });
 
@@ -90,6 +95,16 @@ class FileBrowser {
         this.deleteFile(fileId);
       });
     });
+
+    // Rename file button
+    document.querySelectorAll('.file-item-row[data-type="file"]').forEach(item => {
+      item.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        const fileId = item.dataset.id;
+        const fileName = item.querySelector('.file-name')?.textContent || '';
+        this.showRenameModal('file', fileId, fileName);
+      });
+    });
   }
 
   bindRefreshEvent() {
@@ -98,11 +113,334 @@ class FileBrowser {
     });
   }
 
+  // Selection handling
+  bindSelectionEvents() {
+    document.querySelectorAll('.file-checkbox').forEach(checkbox => {
+      checkbox.addEventListener('change', (e) => {
+        e.stopPropagation();
+        const fileId = checkbox.dataset.id;
+        if (checkbox.checked) {
+          this.selectedFiles.add(fileId);
+          checkbox.closest('.file-item')?.classList.add('selected');
+        } else {
+          this.selectedFiles.delete(fileId);
+          checkbox.closest('.file-item')?.classList.remove('selected');
+        }
+        this.updateBatchActions();
+      });
+    });
+
+    // Click on file item should not toggle checkbox (only checkbox click does)
+    document.querySelectorAll('.file-item-row').forEach(item => {
+      item.addEventListener('click', (e) => {
+        if (e.target.classList.contains('file-checkbox')) return;
+        if (e.target.closest('.file-actions') || e.target.closest('.file-thumb-container')) return;
+        // Could implement click to preview here
+      });
+    });
+  }
+
+  // Batch actions handling
+  bindBatchActions() {
+    const moveBtn = document.getElementById('moveSelectedBtn');
+    const shareBtn = document.getElementById('shareSelectedBtn');
+
+    moveBtn?.addEventListener('click', () => {
+      if (this.selectedFiles.size > 0) {
+        this.showMoveModal();
+      }
+    });
+
+    shareBtn?.addEventListener('click', () => {
+      if (this.selectedFiles.size > 0) {
+        this.showShareModal();
+      }
+    });
+  }
+
+  updateBatchActions() {
+    const batchActions = document.getElementById('batchActions');
+    const selectedCount = document.getElementById('selectedCount');
+    const count = this.selectedFiles.size;
+
+    if (batchActions && selectedCount) {
+      if (count > 0) {
+        batchActions.style.display = 'flex';
+        selectedCount.textContent = `已选择 ${count} 项`;
+      } else {
+        batchActions.style.display = 'none';
+      }
+    }
+  }
+
+  // Drag to move files
+  bindDragMove() {
+    let draggedFileId = null;
+
+    document.querySelectorAll('.file-item-row[draggable="true"]').forEach(item => {
+      item.addEventListener('dragstart', (e) => {
+        draggedFileId = item.dataset.id;
+        item.classList.add('dragging');
+        e.dataTransfer.effectAllowed = 'move';
+      });
+
+      item.addEventListener('dragend', () => {
+        item.classList.remove('dragging');
+        document.querySelectorAll('.folder-item').forEach(f => {
+          f.classList.remove('drag-over');
+        });
+      });
+    });
+
+    document.querySelectorAll('.folder-item[data-droppable="true"]').forEach(folder => {
+      folder.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+        folder.classList.add('drag-over');
+      });
+
+      folder.addEventListener('dragleave', () => {
+        folder.classList.remove('drag-over');
+      });
+
+      folder.addEventListener('drop', async (e) => {
+        e.preventDefault();
+        folder.classList.remove('drag-over');
+
+        if (draggedFileId) {
+          const targetFolderId = folder.dataset.id;
+          try {
+            const res = await fetch(`/files/${draggedFileId}/move`, {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ folder: targetFolderId })
+            });
+            const data = await res.json();
+            if (data.success) {
+              location.reload();
+            } else {
+              alert(data.message || '移动失败');
+            }
+          } catch (error) {
+            console.error('Move error:', error);
+            alert('移动失败');
+          }
+        }
+        draggedFileId = null;
+      });
+    });
+  }
+
+  // Modals
+  initModals() {
+    // Close button handlers
+    document.getElementById('closeMoveModal')?.addEventListener('click', () => this.hideMoveModal());
+    document.getElementById('cancelMoveBtn')?.addEventListener('click', () => this.hideMoveModal());
+    document.getElementById('confirmMoveBtn')?.addEventListener('click', () => this.confirmMove());
+
+    document.getElementById('closeRenameModal')?.addEventListener('click', () => this.hideRenameModal());
+    document.getElementById('cancelRenameBtn')?.addEventListener('click', () => this.hideRenameModal());
+    document.getElementById('confirmRenameBtn')?.addEventListener('click', () => this.confirmRename());
+
+    document.getElementById('closeShareModal')?.addEventListener('click', () => this.hideShareModal());
+    document.getElementById('cancelShareBtn')?.addEventListener('click', () => this.hideShareModal());
+    document.getElementById('createShareBtn')?.addEventListener('click', () => this.createShare());
+
+    // Click outside to close
+    ['moveModal', 'renameModal', 'shareModal'].forEach(id => {
+      const modal = document.getElementById(id);
+      modal?.addEventListener('click', (e) => {
+        if (e.target === modal) {
+          modal.classList.remove('show');
+        }
+      });
+    });
+
+    // Load folder tree
+    this.loadFolderTree();
+  }
+
+  async loadFolderTree() {
+    try {
+      const res = await fetch('/folders', {
+        headers: { 'Authorization': `Bearer ${getCookie('token')}` }
+      });
+      const folders = await res.json();
+
+      const treeContainer = document.getElementById('folderTree');
+      if (!treeContainer || !folders || !folders.data) return;
+
+      // Clear existing items except root
+      treeContainer.innerHTML = `
+        <div class="folder-item root selected" data-id="">
+          <span class="folder-icon">&#128193;</span>
+          <span class="folder-name">全部文件</span>
+        </div>
+      `;
+
+      // Add folders
+      folders.data.forEach(folder => {
+        const item = document.createElement('div');
+        item.className = 'folder-item child';
+        item.dataset.id = folder._id;
+        item.innerHTML = `
+          <span class="folder-icon">&#128194;</span>
+          <span class="folder-name">${folder.name}</span>
+        `;
+        item.addEventListener('click', () => {
+          document.querySelectorAll('.folder-item').forEach(f => f.classList.remove('selected'));
+          item.classList.add('selected');
+        });
+        treeContainer.appendChild(item);
+      });
+    } catch (error) {
+      console.error('Load folder tree error:', error);
+    }
+  }
+
+  showMoveModal() {
+    document.getElementById('moveModal')?.classList.add('show');
+  }
+
+  hideMoveModal() {
+    document.getElementById('moveModal')?.classList.remove('show');
+  }
+
+  async confirmMove() {
+    const selectedFolder = document.querySelector('.folder-item.selected');
+    const targetFolderId = selectedFolder?.dataset.id || '';
+
+    try {
+      const res = await fetch('/files/move-batch', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          fileIds: Array.from(this.selectedFiles),
+          folder: targetFolderId || null
+        })
+      });
+      const data = await res.json();
+
+      if (data.success) {
+        this.hideMoveModal();
+        this.selectedFiles.clear();
+        document.querySelectorAll('.file-checkbox').forEach(cb => {
+          cb.checked = false;
+          cb.closest('.file-item')?.classList.remove('selected');
+        });
+        this.updateBatchActions();
+        location.reload();
+      } else {
+        alert(data.message || '移动失败');
+      }
+    } catch (error) {
+      console.error('Batch move error:', error);
+      alert('移动失败');
+    }
+  }
+
+  showRenameModal(type, id, currentName) {
+    const modal = document.getElementById('renameModal');
+    const input = document.getElementById('renameInput');
+    if (modal && input) {
+      modal.dataset.type = type;
+      modal.dataset.id = id;
+      input.value = currentName;
+      modal.classList.add('show');
+      input.focus();
+      input.select();
+    }
+  }
+
+  hideRenameModal() {
+    document.getElementById('renameModal')?.classList.remove('show');
+  }
+
+  async confirmRename() {
+    const modal = document.getElementById('renameModal');
+    const input = document.getElementById('renameInput');
+    const type = modal?.dataset.type;
+    const id = modal?.dataset.id;
+    const newName = input?.value?.trim();
+
+    if (!newName) {
+      alert('文件名不能为空');
+      return;
+    }
+
+    try {
+      let res;
+      if (type === 'file') {
+        res = await fetch(`/files/${id}/rename`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: newName })
+        });
+      } else {
+        res = await fetch(`/folders/${id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: newName })
+        });
+      }
+
+      const data = await res.json();
+      if (data.success) {
+        this.hideRenameModal();
+        location.reload();
+      } else {
+        alert(data.message || '重命名失败');
+      }
+    } catch (error) {
+      console.error('Rename error:', error);
+      alert('重命名失败');
+    }
+  }
+
+  showShareModal() {
+    document.getElementById('shareModal')?.classList.add('show');
+  }
+
+  hideShareModal() {
+    document.getElementById('shareModal')?.classList.remove('show');
+    document.getElementById('shareExpire').value = '';
+    document.getElementById('sharePassword').value = '';
+  }
+
+  async createShare() {
+    const expire = document.getElementById('shareExpire')?.value;
+    const password = document.getElementById('sharePassword')?.value;
+
+    try {
+      const res = await fetch('/share/create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          fileIds: Array.from(this.selectedFiles),
+          expiresIn: expire ? parseInt(expire) : null,
+          password: password || null
+        })
+      });
+      const data = await res.json();
+
+      if (data.success && data.shareToken) {
+        const shareUrl = `${window.location.origin}/share/${data.shareToken}`;
+        prompt('分享链接已复制到剪贴板：', shareUrl);
+        navigator.clipboard.writeText(shareUrl).catch(() => {});
+        this.hideShareModal();
+      } else {
+        alert(data.message || '创建分享失败');
+      }
+    } catch (error) {
+      console.error('Create share error:', error);
+      alert('创建分享失败');
+    }
+  }
+
   initDragDrop() {
     const dropZone = document.getElementById('dropZone');
     if (!dropZone) return;
 
-    // 拖拽进入
     document.addEventListener('dragenter', (e) => {
       e.preventDefault();
       if (e.dataTransfer.types.includes('Files')) {
@@ -110,19 +448,16 @@ class FileBrowser {
       }
     });
 
-    // 拖拽悬停
     document.addEventListener('dragover', (e) => {
       e.preventDefault();
     });
 
-    // 拖拽离开
     document.addEventListener('dragleave', (e) => {
       if (e.target === document.documentElement || e.target === document.body) {
         dropZone.classList.remove('active');
       }
     });
 
-    // 放下文件
     document.addEventListener('drop', (e) => {
       e.preventDefault();
       dropZone.classList.remove('active');
@@ -143,7 +478,6 @@ class FileBrowser {
 
     if (!modal) return;
 
-    // 点击缩略图打开预览
     document.querySelectorAll('.file-thumb-container').forEach(container => {
       container.addEventListener('click', () => {
         const fullUrl = container.dataset.fullUrl;
@@ -160,19 +494,16 @@ class FileBrowser {
       });
     });
 
-    // 点击关闭按钮
     closeBtn?.addEventListener('click', () => {
       modal.classList.remove('show');
     });
 
-    // 点击模态框背景关闭
     modal.addEventListener('click', (e) => {
       if (e.target === modal) {
         modal.classList.remove('show');
       }
     });
 
-    // ESC 键关闭
     document.addEventListener('keydown', (e) => {
       if (e.key === 'Escape' && modal.classList.contains('show')) {
         modal.classList.remove('show');
@@ -232,28 +563,7 @@ class FileBrowser {
   async renameFolder(folderId) {
     const folder = document.querySelector(`.folder-item[data-id="${folderId}"] .file-name`);
     const currentName = folder?.textContent || '';
-    const newName = prompt('请输入新名称:', currentName);
-
-    if (!newName || newName === currentName) return;
-
-    try {
-      const res = await fetch(`/folders/${folderId}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: newName })
-      });
-
-      const data = await res.json();
-
-      if (data.success) {
-        location.reload();
-      } else {
-        alert(data.message || '重命名失败');
-      }
-    } catch (error) {
-      console.error('Rename folder error:', error);
-      alert('重命名失败');
-    }
+    this.showRenameModal('folder', folderId, currentName);
   }
 
   async deleteFolder(folderId) {
@@ -290,6 +600,8 @@ class FileBrowser {
       if (data.success) {
         const fileItem = document.querySelector(`.file-item-row[data-id="${fileId}"]`);
         fileItem?.remove();
+        this.selectedFiles.delete(fileId);
+        this.updateBatchActions();
       } else {
         alert(data.message || '删除失败');
       }
@@ -331,7 +643,6 @@ class FileBrowser {
 
     const progressBar = uploadItem.querySelector('.upload-progress-bar');
     const statusText = uploadItem.querySelector('.upload-item-status');
-    const nameText = uploadItem.querySelector('.upload-item-name');
 
     const xhr = new XMLHttpRequest();
 

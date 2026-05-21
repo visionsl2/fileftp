@@ -17,7 +17,11 @@ const fs = require('fs');
 const fsp = require('fs').promises;
 const path = require('path');
 const crypto = require('crypto');
+const sharp = require('sharp');
 const uploadConfig = require('../config/upload');
+
+// 图片扩展名列表
+const IMAGE_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.svg', '.ico'];
 
 class StorageService {
   /**
@@ -197,6 +201,72 @@ class StorageService {
    */
   getUserDir(userId) {
     return path.join(uploadConfig.uploadDir, userId.toString());
+  }
+
+  /**
+   * 检查是否为图片文件
+   * @param {string} extension - 文件扩展名
+   * @returns {boolean}
+   */
+  isImage(extension) {
+    return IMAGE_EXTENSIONS.includes(extension.toLowerCase());
+  }
+
+  /**
+   * 生成缩略图
+   * @param {string} filePath - 原图路径
+   * @param {string} fileId - 文件ID
+   * @param {string} userId - 用户ID
+   * @returns {Promise<{path: string, width: number, height: number}>}
+   */
+  async generateThumbnail(filePath, fileId, userId) {
+    // 缩略图尺寸
+    const THUMB_WIDTH = 200;
+    const THUMB_HEIGHT = 200;
+
+    // 创建缩略图目录
+    const thumbDir = path.join(uploadConfig.uploadDir, userId.toString(), 'thumbs');
+    await this.ensureDir(thumbDir);
+
+    // 缩略图文件名
+    const thumbFilename = `${fileId}_thumb.jpg`;
+    const thumbPath = path.join(thumbDir, thumbFilename);
+
+    try {
+      // 使用 sharp 生成缩略图
+      const metadata = await sharp(filePath)
+        .resize(THUMB_WIDTH, THUMB_HEIGHT, {
+          fit: 'cover',
+          position: 'center'
+        })
+        .jpeg({ quality: 80 })
+        .toFile(thumbPath);
+
+      // 统一路径分隔符
+      const normalizedPath = thumbPath.replace(/\\/g, '/');
+
+      return {
+        path: normalizedPath,
+        width: metadata.width,
+        height: metadata.height
+      };
+    } catch (error) {
+      console.error('Generate thumbnail error:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 删除缩略图
+   * @param {string} thumbPath - 缩略图路径
+   */
+  async deleteThumbnail(thumbPath) {
+    if (!thumbPath) return;
+    try {
+      await fsp.unlink(thumbPath);
+    } catch {
+      // 忽略删除失败
+    }
   }
 }
 

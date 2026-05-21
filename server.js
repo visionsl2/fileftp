@@ -23,6 +23,7 @@ const authRoutes = require('./app/routes/authRoutes');
 const fileRoutes = require('./app/routes/fileRoutes');
 const folderRoutes = require('./app/routes/folderRoutes');
 const apiRoutes = require('./app/routes/apiRoutes');
+const shareRoutes = require('./app/routes/shareRoutes');
 
 const app = express();
 
@@ -75,6 +76,9 @@ app.use('/folders', folderRoutes);
 
 // 开放API路由：供第三方系统调用
 app.use('/api/v1', apiRoutes);
+
+// 分享路由：无需登录即可访问
+app.use('/share', shareRoutes);
 
 // ==================== 根路由 ====================
 

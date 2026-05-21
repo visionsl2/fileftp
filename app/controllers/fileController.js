@@ -180,6 +180,22 @@ const fileController = {
         });
 
         await fileDoc.save();
+
+        // 如果是图片文件，生成缩略图
+        if (storageService.isImage(ext)) {
+          try {
+            const thumbInfo = await storageService.generateThumbnail(
+              storage.path,
+              fileDoc._id.toString(),
+              userId
+            );
+            fileDoc.thumb = thumbInfo;
+            await fileDoc.save();
+          } catch (thumbErr) {
+            console.error('Generate thumbnail error:', thumbErr);
+          }
+        }
+
         uploadedFiles.push(fileDoc);
       } catch (fileErr) {
         console.error('Save file error:', fileErr);
@@ -289,6 +305,11 @@ const fileController = {
       // 删除物理文件
       await storageService.deleteFile(file.storage.path);
 
+      // 删除缩略图
+      if (file.thumb && file.thumb.path) {
+        await storageService.deleteThumbnail(file.thumb.path);
+      }
+
       res.json({ success: true });
     } catch (error) {
       console.error('deleteFile error:', error);
@@ -332,7 +353,7 @@ const fileController = {
   /**
    * 获取图片缩略图
    *
-   * 直接返回图片文件，前端可作为 <img src=""> 使用
+   * 返回真正的缩略图文件（如果存在），否则返回原始图片
    */
   getThumbnail: async (req, res) => {
     try {
@@ -356,10 +377,15 @@ const fileController = {
 
       // 设置缓存头（1小时）
       res.setHeader('Cache-Control', 'public, max-age=3600');
-      res.setHeader('Content-Type', file.mimeType);
+      res.setHeader('Content-Type', 'image/jpeg');
 
-      // 流式传输文件
-      const readStream = storageService.createReadStream(file.storage.path);
+      // 如果有缩略图，返回缩略图；否则返回原图
+      let filePath = file.storage.path;
+      if (file.thumb && file.thumb.path) {
+        filePath = file.thumb.path;
+      }
+
+      const readStream = storageService.createReadStream(filePath);
       readStream.on('error', (err) => {
         console.error('Thumbnail stream error:', err);
         if (!res.headersSent) {
@@ -413,6 +439,118 @@ const fileController = {
     } catch (error) {
       console.error('getPreview error:', error);
       res.status(500).json({ success: false, message: '预览加载失败' });
+    }
+  },
+
+  /**
+   * 重命名文件
+   */
+  renameFile: async (req, res) => {
+    try {
+      const userId = req.userId;
+      const { name } = req.body;
+
+      if (!name || !name.trim()) {
+        return res.status(400).json({ success: false, message: '文件名不能为空' });
+      }
+
+      const file = await File.findOne({
+        _id: req.params.id,
+        owner: userId,
+        isDeleted: false
+      });
+
+      if (!file) {
+        return res.status(404).json({ success: false, message: '文件不存在' });
+      }
+
+      file.originalName = name.trim();
+      await file.save();
+
+      res.json({ success: true, name: file.originalName });
+    } catch (error) {
+      console.error('renameFile error:', error);
+      res.status(500).json({ success: false, message: '重命名失败' });
+    }
+  },
+
+  /**
+   * 移动文件到指定文件夹
+   */
+  moveFile: async (req, res) => {
+    try {
+      const userId = req.userId;
+      const { folder } = req.body; // 目标文件夹ID，null表示根目录
+
+      const file = await File.findOne({
+        _id: req.params.id,
+        owner: userId,
+        isDeleted: false
+      });
+
+      if (!file) {
+        return res.status(404).json({ success: false, message: '文件不存在' });
+      }
+
+      // 如果目标文件夹存在，验证所有权
+      if (folder) {
+        const targetFolder = await Folder.findOne({
+          _id: folder,
+          owner: userId,
+          isDeleted: false
+        });
+        if (!targetFolder) {
+          return res.status(404).json({ success: false, message: '目标文件夹不存在' });
+        }
+      }
+
+      file.folder = folder || null;
+      await file.save();
+
+      res.json({ success: true });
+    } catch (error) {
+      console.error('moveFile error:', error);
+      res.status(500).json({ success: false, message: '移动失败' });
+    }
+  },
+
+  /**
+   * 批量移动文件
+   */
+  moveBatchFiles: async (req, res) => {
+    try {
+      const userId = req.userId;
+      const { fileIds, folder } = req.body;
+
+      if (!Array.isArray(fileIds) || fileIds.length === 0) {
+        return res.status(400).json({ success: false, message: '请选择要移动的文件' });
+      }
+
+      // 如果目标文件夹存在，验证所有权
+      if (folder) {
+        const targetFolder = await Folder.findOne({
+          _id: folder,
+          owner: userId,
+          isDeleted: false
+        });
+        if (!targetFolder) {
+          return res.status(404).json({ success: false, message: '目标文件夹不存在' });
+        }
+      }
+
+      await File.updateMany(
+        {
+          _id: { $in: fileIds },
+          owner: userId,
+          isDeleted: false
+        },
+        { $set: { folder: folder || null } }
+      );
+
+      res.json({ success: true });
+    } catch (error) {
+      console.error('moveBatchFiles error:', error);
+      res.status(500).json({ success: false, message: '批量移动失败' });
     }
   }
 };

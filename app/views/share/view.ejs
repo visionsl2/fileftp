@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>FileFTP 分享</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f5f5; color: #333; line-height: 1.6; }
+    .container { max-width: 900px; margin: 40px auto; padding: 20px; }
+    .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 30px; border-radius: 12px 12px 0 0; text-align: center; }
+    .header h1 { font-size: 24px; margin-bottom: 8px; }
+    .header p { opacity: 0.9; font-size: 14px; }
+    .share-badge { display: inline-block; background: rgba(255,255,255,0.2); padding: 4px 12px; border-radius: 12px; font-size: 12px; margin-top: 12px; }
+    .content { background: white; padding: 30px; border-radius: 0 0 12px 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.08); }
+    .file-list { margin-top: 20px; }
+    .file-item { display: flex; align-items: center; padding: 16px; border: 1px solid #eee; border-radius: 8px; margin-bottom: 10px; transition: all 0.2s; }
+    .file-item:hover { background: #f8f9fa; }
+    .file-icon { width: 40px; height: 40px; margin-right: 16px; }
+    .file-icon svg { width: 100%; height: 100%; }
+    .file-info { flex: 1; }
+    .file-name { font-weight: 500; color: #333; }
+    .file-meta { font-size: 12px; color: #999; margin-top: 4px; }
+    .file-actions { display: flex; gap: 8px; }
+    .btn { padding: 8px 16px; border-radius: 6px; text-decoration: none; font-size: 14px; transition: all 0.2s; display: inline-flex; align-items: center; gap: 6px; }
+    .btn-primary { background: #667eea; color: white; border: none; cursor: pointer; }
+    .btn-primary:hover { background: #5a6fd6; }
+    .btn svg { width: 16px; height: 16px; fill: currentColor; }
+    .empty-state { text-align: center; padding: 40px; color: #999; }
+    .icon-default svg { fill: #90A4AE; }
+    .icon-image-preview { width: 48px; height: 48px; border-radius: 4px; object-fit: cover; margin-right: 16px; }
+    .footer { text-align: center; padding: 20px; color: #999; font-size: 12px; }
+    .error-box { background: #ffebee; border: 1px solid #ef5350; border-radius: 8px; padding: 20px; text-align: center; color: #c62828; }
+    .icon-back svg { fill: #FFCA28; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <% if (error) { %>
+    <div class="header">
+      <h1>FileFTP 分享</h1>
+      <span class="share-badge">分享</span>
+    </div>
+    <div class="content">
+      <div class="error-box">
+        <h2><%= error %></h2>
+        <% if (needPassword) { %>
+          <p style="margin-top: 16px;">请输入访问密码</p>
+        <% } %>
+      </div>
+    </div>
+    <% } else { %>
+    <div class="header">
+      <h1><%= share.name %></h1>
+      <p>由 <%= share.createdBy %> 分享</p>
+      <% if (share.expiresAt) { %>
+        <span class="share-badge">有效期至 <%= new Date(share.expiresAt).toLocaleDateString() %></span>
+      <% } else { %>
+        <span class="share-badge">永久有效</span>
+      <% } %>
+    </div>
+    <div class="content">
+      <% if (files.length === 0) { %>
+        <div class="empty-state"><p>分享的文件已被删除或不存在</p></div>
+      <% } else { %>
+        <div class="file-list">
+          <% files.forEach(function(file) { %>
+            <div class="file-item">
+              <% if (file.isImage) { %>
+                <img src="/share/<%= shareToken %>/thumb/<%= file.id %>" class="icon-image-preview" alt="<%= file.name %>" loading="lazy">
+              <% } else { %>
+                <div class="file-icon icon-default">
+                  <svg viewBox="0 0 24 24"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/></svg>
+                </div>
+              <% } %>
+              <div class="file-info">
+                <div class="file-name"><%= file.name %></div>
+                <div class="file-meta"><%= file.size %> bytes</div>
+              </div>
+              <div class="file-actions">
+                <a href="/share/<%= shareToken %>/download/<%= file.id %>" class="btn btn-primary">
+                  <svg viewBox="0 0 24 24"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>
+                  下载
+                </a>
+              </div>
+            </div>
+          <% }) %>
+        </div>
+      <% } %>
+    </div>
+    <div class="footer">FileFTP 分享</div>
+    <% } %>
+  </div>
+</body>
+</html>

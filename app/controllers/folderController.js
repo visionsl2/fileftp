@@ -12,6 +12,28 @@ const File = require('../models/File');
 
 const folderController = {
   /**
+   * 获取文件夹列表
+   */
+  listFolders: async (req, res) => {
+    try {
+      const userId = req.userId || req.session?.userId;
+      if (!userId) {
+        return res.status(401).json({ success: false, message: '未认证' });
+      }
+
+      const folders = await Folder.find({
+        owner: userId,
+        isDeleted: false
+      }).sort({ name: 1 });
+
+      res.json({ success: true, data: folders });
+    } catch (error) {
+      console.error('listFolders error:', error);
+      res.status(500).json({ success: false, message: '获取文件夹列表失败' });
+    }
+  },
+
+  /**
    * 创建文件夹
    *
    * @param {string} req.body.name - 文件夹名称

@@ -80,6 +80,12 @@ const fileSchema = new mongoose.Schema({
     },
     lastDownload: Date    // 最后下载时间
   },
+  // 缩略图信息（仅图片文件）
+  thumb: {
+    path: String,         // 缩略图路径
+    width: Number,        // 缩略图宽度
+    height: Number       // 缩略图高度
+  },
   // 软删除标志 - true表示已删除
   isDeleted: {
     type: Boolean,

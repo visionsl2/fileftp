@@ -15,6 +15,12 @@ router.get('/:id', fileController.getFileInfo);
 router.get('/:id/download', fileController.downloadFile);
 router.get('/:id/thumb', fileController.getThumbnail);
 router.get('/:id/preview', fileController.getPreview);
+
+// 文件操作
+router.patch('/:id/rename', fileController.renameFile);
+router.patch('/:id/move', fileController.moveFile);
+router.patch('/move-batch', fileController.moveBatchFiles);
+
 router.delete('/:id', fileController.deleteFile);
 
 module.exports = router;

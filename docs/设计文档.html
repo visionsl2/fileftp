@@ -38,7 +38,7 @@
     <div class="header">
       <h1>FileFTP 设计文档</h1>
       <p class="subtitle">文件上传下载浏览系统 - 技术架构与设计说明</p>
-      <div style="margin-top:12px"><span style="background:rgba(255,255,255,0.2);padding:4px 12px;border-radius:12px;font-size:12px">V1.1</span></div>
+      <div style="margin-top:12px"><span style="background:rgba(255,255,255,0.2);padding:4px 12px;border-radius:12px;font-size:12px">V1.2</span></div>
     </div>
 
     <div class="content">
@@ -51,8 +51,11 @@
           <li><strong>文件上传</strong> - 单文件/多文件上传，实时进度显示，支持大文件分片上传</li>
           <li><strong>文件下载</strong> - 流式传输，支持中文文件名，RFC 5987标准编码</li>
           <li><strong>文件浏览</strong> - 仿Windows资源管理器风格，网格/列表视图切换</li>
-          <li><strong>图片预览</strong> - 图片缩略图显示，点击可放大查看，支持下载</li>
+          <li><strong>图片预览</strong> - 真正的缩略图生成（sharp），点击可放大查看，支持下载</li>
           <li><strong>拖拽上传</strong> - 拖拽文件到页面任意位置直接上传</li>
+          <li><strong>文件名重命名</strong> - 已上传文件支持修改名称</li>
+          <li><strong>文件移动</strong> - 多选文件+拖拽到文件夹移动，支持批量移动</li>
+          <li><strong>文件分享</strong> - 生成分享链接，支持设置过期时间和访问密码</li>
           <li><strong>文件夹管理</strong> - 创建、重命名、删除，支持层级目录结构</li>
           <li><strong>数据隔离</strong> - 用户只能访问自己的文件，确保隐私安全</li>
           <li><strong>安全过滤</strong> - 黑名单机制，禁止上传危险文件类型</li>
@@ -298,6 +301,7 @@ Folder.find({ owner: userId, ... })</code></pre>
       <h2>7. 版本信息</h2>
       <table>
         <tr><th>版本</th><th>日期</th><th>更新内容</th></tr>
+        <tr><td>1.2.0</td><td>2026-05-21</td><td>新增：真正的缩略图生成（sharp）、文件名重命名、文件移动（多选+拖拽）、分享功能</td></tr>
         <tr><td>1.1.0</td><td>2026-05-21</td><td>新增：图片缩略图预览、拖拽上传、可配置存储路径</td></tr>
         <tr><td>1.0.0</td><td>2026-05-18</td><td>初始版本，包含核心功能</td></tr>
       </table>
