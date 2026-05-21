@@ -128,8 +128,12 @@ MONGODB_URI=mongodb://localhost:27017/fileftp
 JWT_SECRET=your-super-secret-key-change-this
 JWT_EXPIRES_IN=7d
 
-# 上传配置
+# 上传配置 - 支持任意磁盘路径
+# Windows示例: D:/uploads 或 E:\FileFTP\uploads
+# Linux示例: /home/user/uploads 或 /data/fileftp/uploads
+# 相对路径会相对于项目根目录
 UPLOAD_DIR=./uploads
+
 MAX_FILE_SIZE=104857600
 MAX_CHUNK_SIZE=5242880
 MAX_FILES_PER_REQUEST=10
@@ -142,10 +146,25 @@ SESSION_SECRET=session-secret-change-this</code></pre>
         </div>
       </div>
 
+      <div class="tip">
+        <strong>存储路径说明：</strong> UPLOAD_DIR 支持绝对路径和相对路径。
+        <ul style="margin:8px 0 0 16px;font-size:13px">
+          <li>Windows: <code>D:/uploads</code> 或 <code>E:\FileFTP\uploads</code></li>
+          <li>Linux: <code>/home/user/uploads</code> 或 <code>/data/fileftp</code></li>
+          <li>相对路径: <code>./uploads</code> 相对于项目根目录</li>
+        </ul>
+      </div>
+
       <div class="step">
         <h4>步骤 4: 创建上传目录</h4>
-        <pre><code>mkdir -p uploads
-chmod 755 uploads</code></pre>
+        <pre><code># 如果使用相对路径
+mkdir -p uploads
+chmod 755 uploads
+
+# 如果使用自定义路径（如Linux）
+mkdir -p /data/fileftp/uploads
+chmod 755 /data/fileftp/uploads
+chown -R www-data:www-data /data/fileftp</code></pre>
       </div>
 
       <div class="step">
@@ -322,7 +341,7 @@ pm2 set pm2-logrotate:retain 7</code></pre>
         <tr><td>MONGODB_URI</td><td>mongodb://localhost:27017/fileftp</td><td>数据库连接</td></tr>
         <tr><td>JWT_SECRET</td><td>-</td><td>JWT签名密钥（必填）</td></tr>
         <tr><td>JWT_EXPIRES_IN</td><td>7d</td><td>Token有效期</td></tr>
-        <tr><td>UPLOAD_DIR</td><td>./uploads</td><td>上传目录</td></tr>
+        <tr><td>UPLOAD_DIR</td><td>./uploads</td><td>文件存储目录，支持绝对/相对路径（Windows: D:/uploads, Linux: /data/uploads）</td></tr>
         <tr><td>MAX_FILE_SIZE</td><td>104857600</td><td>最大文件大小(100MB)</td></tr>
         <tr><td>MAX_CHUNK_SIZE</td><td>5242880</td><td>分片大小(5MB)</td></tr>
         <tr><td>MAX_FILES_PER_REQUEST</td><td>10</td><td>每次最多上传文件数</td></tr>
