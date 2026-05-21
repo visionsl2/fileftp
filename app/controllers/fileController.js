@@ -127,7 +127,11 @@ const fileController = {
       });
     });
 
-    const folderId = parsed.fields.folder?.[0] || null;
+    // formidable v2 returns fields as plain values (not arrays), so we need to handle both cases
+    const folderIdRaw = Array.isArray(parsed.fields.folder)
+      ? parsed.fields.folder[0]
+      : (parsed.fields.folder || '');
+    const folderId = folderIdRaw && /^[a-fA-F0-9]{24}$/.test(folderIdRaw) ? folderIdRaw : null;
     const user = await User.findById(userId);
 
     // 处理文件列表

@@ -5,9 +5,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
 class FileBrowser {
   constructor() {
-    this.currentFolder = document.querySelector('input[name="folder"]')?.value || '';
+    const urlParams = new URLSearchParams(window.location.search);
+    this.currentFolder = urlParams.get('folder') || '';
     this.viewMode = localStorage.getItem('viewMode') || 'grid';
     this.selectedFiles = new Set();
+    this.selectedFolderItem = null;
     this.init();
   }
 
@@ -254,12 +256,12 @@ class FileBrowser {
       folder.addEventListener('click', (e) => {
         // 如果正在拖拽，不执行导航
         if (document.querySelector('.file-item.dragging')) return;
-
         const folderId = folder.dataset.id;
         this.navigateToFolder(folderId);
       });
     });
-  }
+
+      }
 
   // Modals
   initModals() {
@@ -290,15 +292,34 @@ class FileBrowser {
     this.loadFolderTree();
   }
 
+  selectFolderItem(item) {
+    document.querySelectorAll('#folderTree .folder-item').forEach(f => f.classList.remove('selected'));
+    item.classList.add('selected');
+    this.selectedFolderItem = item;
+  }
+
   async loadFolderTree() {
     try {
+      // 读取所有 cookie
+      const cookies = document.cookie;
+      console.log('All cookies:', cookies);
+
+      // 直接用 fetch 发送 same-origin 请求，Cookie 会自动发送
       const res = await fetch('/folders', {
-        headers: { 'Authorization': `Bearer ${getCookie('token')}` }
+        headers: {
+          'Accept': 'application/json'
+        }
       });
       const folders = await res.json();
+      console.log('Folders API response:', folders);
 
       const treeContainer = document.getElementById('folderTree');
-      if (!treeContainer || !folders || !folders.data) return;
+      if (!treeContainer || !folders || !folders.data) {
+        console.log('Skip: missing container or folders');
+        return;
+      }
+
+      console.log('Building tree with', folders.data.length, 'folders');
 
       // Clear existing items except root
       treeContainer.innerHTML = `
@@ -315,6 +336,7 @@ class FileBrowser {
 
       folders.data.forEach(folder => {
         folderMap[folder._id] = { ...folder, children: [] };
+        console.log('  Added to map:', folder.name, 'parent:', folder.parent);
       });
 
       folders.data.forEach(folder => {
@@ -331,12 +353,12 @@ class FileBrowser {
       });
 
       // Render tree recursively
-      const renderNode = (node, level = 0) => {
+      const renderNode = (node) => {
         const item = document.createElement('div');
         item.className = 'folder-item child';
         item.dataset.id = node._id;
         item.dataset.selectable = 'true';
-        item.style.paddingLeft = `${12 + level * 20}px`;
+        item.style.setProperty('padding-left', `${32 + (node.depth || 0) * 20}px`, 'important');
         item.innerHTML = `
           <span class="folder-icon">&#128194;</span>
           <span class="folder-name">${node.name}</span>
@@ -344,29 +366,36 @@ class FileBrowser {
         return item;
       };
 
-      const renderTree = (nodes, container, level = 0) => {
+      const renderTree = (nodes, container) => {
         nodes.forEach(node => {
-          const item = renderNode(node, level);
+          const item = renderNode(node);
           item.addEventListener('click', (e) => {
             e.stopPropagation();
-            document.querySelectorAll('.folder-item').forEach(f => f.classList.remove('selected'));
-            item.classList.add('selected');
+            this.selectFolderItem(item);
           });
           container.appendChild(item);
-          if (node.children && node.children.length > 0) {
-            renderTree(node.children, container, level + 1);
+          if (node.children?.length > 0) {
+            renderTree(node.children, container);
           }
         });
       };
 
       renderTree(rootFolders, treeContainer);
+      console.log('Tree rendered, total items:', treeContainer.querySelectorAll('.folder-item').length);
 
       // Add click handler for root
       const rootItem = treeContainer.querySelector('.folder-item.root');
       rootItem?.addEventListener('click', (e) => {
         e.stopPropagation();
-        document.querySelectorAll('.folder-item').forEach(f => f.classList.remove('selected'));
-        rootItem.classList.add('selected');
+        this.selectFolderItem(rootItem);
+      });
+
+      treeContainer.addEventListener('click', (e) => {
+        const item = e.target.closest('.folder-item');
+        if (item && item.dataset.selectable) {
+          e.stopPropagation();
+          this.selectFolderItem(item);
+        }
       });
 
     } catch (error) {
@@ -421,6 +450,11 @@ class FileBrowser {
     if (modal && input) {
       modal.dataset.type = type;
       modal.dataset.id = id;
+
+      if (type === 'file') {
+        currentName = getFileNameWithoutExt(currentName);
+      }
+
       input.value = currentName;
       modal.classList.add('show');
       input.focus();
@@ -444,31 +478,12 @@ class FileBrowser {
       return;
     }
 
-    // 对于文件，获取原始扩展名并验证
     if (type === 'file') {
-      // 获取原始文件名（从界面）
-      const fileItem = document.querySelector(`.file-item-row[data-id="${id}"]`);
-      const originalNameEl = fileItem?.querySelector('.file-name');
-      const originalName = originalNameEl?.textContent || '';
-
-      // 提取扩展名
-      const lastDot = originalName.lastIndexOf('.');
-      const originalExt = lastDot > 0 ? originalName.substring(lastDot) : '';
-
-      if (originalExt) {
-        // 检查新名称是否包含扩展名
-        const newLastDot = newName.lastIndexOf('.');
-        const newExt = newLastDot > 0 ? newName.substring(newLastDot) : '';
-
-        if (newExt && newExt.toLowerCase() !== originalExt.toLowerCase()) {
-          alert('不能修改文件扩展名');
-          return;
-        }
-
-        // 如果新名称没有扩展名，自动加上
-        if (!newExt) {
-          // newName = newName + originalExt; // 暂不自动添加，让用户明确输入
-        }
+      const originalName = document.querySelector(`.file-item-row[data-id="${id}"] .file-name`)?.textContent || '';
+      const ext = getFileExt(originalName);
+      if (ext && getFileExt(newName) && getFileExt(newName).toLowerCase() !== ext.toLowerCase()) {
+        alert('不能修改文件扩展名');
+        return;
       }
     }
 
@@ -728,7 +743,8 @@ class FileBrowser {
     if (uploadList) uploadList.innerHTML = '';
 
     const formData = new FormData();
-    formData.append('folder', this.currentFolder || '');
+    const urlParams = new URLSearchParams(window.location.search);
+    formData.append('folder', urlParams.get('folder') || '');
 
     for (let i = 0; i < files.length; i++) {
       formData.append('files', files[i]);
@@ -814,4 +830,14 @@ function getCookie(name) {
   const parts = value.split(`; ${name}=`);
   if (parts.length === 2) return parts.pop().split(';').shift();
   return null;
+}
+
+function getFileExt(filename) {
+  const lastDot = filename.lastIndexOf('.');
+  return lastDot > 0 ? filename.substring(lastDot) : '';
+}
+
+function getFileNameWithoutExt(filename) {
+  const lastDot = filename.lastIndexOf('.');
+  return lastDot > 0 ? filename.substring(0, lastDot) : filename;
 }

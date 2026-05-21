@@ -850,10 +850,14 @@ body {
 .folder-item {
   display: flex;
   align-items: center;
-  padding: 10px 12px;
+  padding-top: 10px;
+  padding-right: 12px;
+  padding-bottom: 10px;
+  padding-left: 12px;
   cursor: pointer;
   border-radius: 6px;
   margin-bottom: 4px;
+  box-sizing: border-box;
 }
 
 .folder-item:hover {
@@ -874,9 +878,7 @@ body {
   font-size: 14px;
 }
 
-.folder-item.child {
-  padding-left: 36px;
-}
+/* 移除固定 padding，JS 会动态设置 */
 
 /* 分享链接样式 */
 .share-link-container {
