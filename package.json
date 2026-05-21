@@ -4,7 +4,8 @@
   "description": "文件上传下载浏览系统",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js",
+    "build": "babel app -d dist/app --copy-files && babel server.js -o dist/server.js && cp .env dist/.env",
+    "start": "node dist/server.js",
     "dev": "nodemon server.js"
   },
   "keywords": [
@@ -17,20 +18,23 @@
   "author": "",
   "license": "MIT",
   "dependencies": {
-    "bcryptjs": "^2.4.3",
-    "cookie-parser": "^1.4.7",
-    "cors": "^2.8.5",
-    "dotenv": "^16.4.5",
-    "ejs": "^3.1.10",
-    "express": "^4.21.0",
-    "express-rate-limit": "^7.4.0",
-    "express-session": "^1.18.0",
-    "formidable": "^3.5.4",
-    "jsonwebtoken": "^9.0.2",
-    "mongoose": "^8.5.0",
-    "multer": "^1.4.5-lts.1"
+    "bcryptjs": "2.4.3",
+    "cookie-parser": "1.4.6",
+    "cors": "2.8.5",
+    "dotenv": "16.0.3",
+    "ejs": "3.1.8",
+    "express": "4.18.2",
+    "express-rate-limit": "6.11.0",
+    "express-session": "1.17.3",
+    "formidable": "2.1.1",
+    "jsonwebtoken": "9.0.0",
+    "mongoose": "6.11.0",
+    "multer": "1.4.4"
   },
   "devDependencies": {
-    "nodemon": "^3.1.4"
+    "@babel/cli": "7.28.6",
+    "@babel/core": "7.29.0",
+    "@babel/preset-env": "7.29.5",
+    "nodemon": "2.0.20"
   }
 }

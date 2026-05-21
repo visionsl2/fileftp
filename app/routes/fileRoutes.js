@@ -13,6 +13,8 @@ router.post('/upload', fileController.uploadFiles);
 
 router.get('/:id', fileController.getFileInfo);
 router.get('/:id/download', fileController.downloadFile);
+router.get('/:id/thumb', fileController.getThumbnail);
+router.get('/:id/preview', fileController.getPreview);
 router.delete('/:id', fileController.deleteFile);
 
 module.exports = router;

@@ -327,6 +327,93 @@ const fileController = {
       console.error('getFileInfo error:', error);
       res.status(500).json({ success: false, message: '获取文件信息失败' });
     }
+  },
+
+  /**
+   * 获取图片缩略图
+   *
+   * 直接返回图片文件，前端可作为 <img src=""> 使用
+   */
+  getThumbnail: async (req, res) => {
+    try {
+      const userId = req.userId;
+
+      const file = await File.findOne({
+        _id: req.params.id,
+        owner: userId,
+        isDeleted: false
+      });
+
+      if (!file) {
+        return res.status(404).json({ success: false, message: '文件不存在' });
+      }
+
+      // 检查是否为图片类型
+      const imageExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.svg', '.ico'];
+      if (!imageExtensions.includes(file.extension.toLowerCase())) {
+        return res.status(400).json({ success: false, message: '不是图片文件' });
+      }
+
+      // 设置缓存头（1小时）
+      res.setHeader('Cache-Control', 'public, max-age=3600');
+      res.setHeader('Content-Type', file.mimeType);
+
+      // 流式传输文件
+      const readStream = storageService.createReadStream(file.storage.path);
+      readStream.on('error', (err) => {
+        console.error('Thumbnail stream error:', err);
+        if (!res.headersSent) {
+          res.status(500).json({ success: false, message: '缩略图加载失败' });
+        }
+      });
+      readStream.pipe(res);
+    } catch (error) {
+      console.error('getThumbnail error:', error);
+      res.status(500).json({ success: false, message: '缩略图加载失败' });
+    }
+  },
+
+  /**
+   * 获取图片预览（原图）
+   *
+   * 返回完整尺寸的图片用于预览模态框
+   */
+  getPreview: async (req, res) => {
+    try {
+      const userId = req.userId;
+
+      const file = await File.findOne({
+        _id: req.params.id,
+        owner: userId,
+        isDeleted: false
+      });
+
+      if (!file) {
+        return res.status(404).json({ success: false, message: '文件不存在' });
+      }
+
+      // 检查是否为图片类型
+      const imageExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.svg', '.ico'];
+      if (!imageExtensions.includes(file.extension.toLowerCase())) {
+        return res.status(400).json({ success: false, message: '不是图片文件' });
+      }
+
+      res.setHeader('Cache-Control', 'public, max-age=86400');
+      res.setHeader('Content-Type', file.mimeType);
+      res.setHeader('Content-Length', file.size);
+
+      const readStream = storageService.createReadStream(file.storage.path);
+      readStream.on('error', (err) => {
+        console.error('Preview stream error:', err);
+        if (!res.headersSent) {
+          res.status(500).json({ success: false, message: '预览加载失败' });
+        }
+      });
+      readStream.pipe(res);
+    } catch (error) {
+      console.error('getPreview error:', error);
+      res.status(500).json({ success: false, message: '预览加载失败' });
+    }
   }
 };
 

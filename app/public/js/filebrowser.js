@@ -16,6 +16,8 @@ class FileBrowser {
     this.bindFolderEvents();
     this.bindFileEvents();
     this.bindRefreshEvent();
+    this.initDragDrop();
+    this.initImagePreview();
     this.applyViewMode();
   }
 
@@ -93,6 +95,88 @@ class FileBrowser {
   bindRefreshEvent() {
     document.getElementById('refreshBtn')?.addEventListener('click', () => {
       this.refresh();
+    });
+  }
+
+  initDragDrop() {
+    const dropZone = document.getElementById('dropZone');
+    if (!dropZone) return;
+
+    // 拖拽进入
+    document.addEventListener('dragenter', (e) => {
+      e.preventDefault();
+      if (e.dataTransfer.types.includes('Files')) {
+        dropZone.classList.add('active');
+      }
+    });
+
+    // 拖拽悬停
+    document.addEventListener('dragover', (e) => {
+      e.preventDefault();
+    });
+
+    // 拖拽离开
+    document.addEventListener('dragleave', (e) => {
+      if (e.target === document.documentElement || e.target === document.body) {
+        dropZone.classList.remove('active');
+      }
+    });
+
+    // 放下文件
+    document.addEventListener('drop', (e) => {
+      e.preventDefault();
+      dropZone.classList.remove('active');
+
+      const files = e.dataTransfer?.files;
+      if (files && files.length > 0) {
+        this.uploadFiles(files);
+      }
+    });
+  }
+
+  initImagePreview() {
+    const modal = document.getElementById('imagePreviewModal');
+    const previewImg = document.getElementById('previewImg');
+    const closeBtn = document.querySelector('.modal-close');
+    const previewFileName = document.getElementById('previewFileName');
+    const downloadBtn = document.getElementById('previewDownloadBtn');
+
+    if (!modal) return;
+
+    // 点击缩略图打开预览
+    document.querySelectorAll('.file-thumb-container').forEach(container => {
+      container.addEventListener('click', () => {
+        const fullUrl = container.dataset.fullUrl;
+        const fileId = container.closest('.file-item')?.dataset.id;
+        const fileName = container.closest('.file-item')?.querySelector('.file-name')?.textContent;
+
+        if (fullUrl && previewImg) {
+          previewImg.src = fullUrl;
+          previewImg.dataset.fileId = fileId;
+          if (previewFileName) previewFileName.textContent = fileName || '';
+          if (downloadBtn) downloadBtn.href = `/files/${fileId}/download`;
+          modal.classList.add('show');
+        }
+      });
+    });
+
+    // 点击关闭按钮
+    closeBtn?.addEventListener('click', () => {
+      modal.classList.remove('show');
+    });
+
+    // 点击模态框背景关闭
+    modal.addEventListener('click', (e) => {
+      if (e.target === modal) {
+        modal.classList.remove('show');
+      }
+    });
+
+    // ESC 键关闭
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && modal.classList.contains('show')) {
+        modal.classList.remove('show');
+      }
     });
   }
 
