@@ -77,7 +77,8 @@ body {
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
 }
 
-.toolbar-left, .toolbar-right {
+.toolbar-left,
+.toolbar-right {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -270,16 +271,35 @@ body {
   fill: #FFCA28;
 }
 
-.icon-image svg { fill: #4CAF50; }
-.icon-video svg { fill: #E91E63; }
-.icon-audio svg { fill: #9C27B0; }
-.icon-pdf svg { fill: #F44336; }
-.icon-doc svg { fill: #2196F3; }
-.icon-archive svg { fill: #795548; }
-.icon-default svg { fill: #90A4AE; }
+.icon-image svg {
+  fill: #4CAF50;
+}
+
+.icon-video svg {
+  fill: #E91E63;
+}
+
+.icon-audio svg {
+  fill: #9C27B0;
+}
+
+.icon-pdf svg {
+  fill: #F44336;
+}
+
+.icon-doc svg {
+  fill: #2196F3;
+}
+
+.icon-archive svg {
+  fill: #795548;
+}
+
+.icon-default svg {
+  fill: #90A4AE;
+}
 
 .file-name {
-  margin-top: 8px;
   font-size: 13px;
   text-align: center;
   word-break: break-all;
@@ -291,7 +311,8 @@ body {
   max-width: 120px;
 }
 
-.file-size, .file-date {
+.file-size,
+.file-date {
   display: none;
   font-size: 12px;
   color: #666;
@@ -482,7 +503,8 @@ body {
     align-items: stretch;
   }
 
-  .toolbar-left, .toolbar-right {
+  .toolbar-left,
+  .toolbar-right {
     justify-content: center;
   }
 
@@ -664,8 +686,15 @@ body {
 }
 
 @keyframes bounce {
-  0%, 100% { transform: translateY(0); }
-  50% { transform: translateY(-10px); }
+
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+
+  50% {
+    transform: translateY(-10px);
+  }
 }
 
 /* 多选样式 */
@@ -837,7 +866,6 @@ body {
 }
 
 .folder-item .folder-icon {
-  margin-right: 10px;
   font-size: 18px;
 }
 

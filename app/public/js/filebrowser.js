@@ -61,7 +61,8 @@ class FileBrowser {
   }
 
   bindFolderEvents() {
-    document.querySelectorAll('.folder-item').forEach(item => {
+    // 只处理文件列表中的文件夹项（有 data-type="folder"）
+    document.querySelectorAll('.folder-item[data-type="folder"]').forEach(item => {
       item.addEventListener('click', (e) => {
         if (e.target.classList.contains('action-btn') || e.target.closest('.action-btn')) return;
         const folderId = item.dataset.id;
@@ -175,17 +176,27 @@ class FileBrowser {
 
   // Drag to move files
   bindDragMove() {
-    let draggedFileId = null;
+    let draggedFileIds = [];
 
     document.querySelectorAll('.file-item-row[draggable="true"]').forEach(item => {
       item.addEventListener('dragstart', (e) => {
-        draggedFileId = item.dataset.id;
+        // 获取所有被选中的文件
+        const checkedBoxes = document.querySelectorAll('.file-checkbox:checked');
+        if (checkedBoxes.length > 0) {
+          // 移动所有选中的文件
+          draggedFileIds = Array.from(checkedBoxes).map(cb => cb.dataset.id);
+        } else {
+          // 移动当前文件
+          draggedFileIds = [item.dataset.id];
+        }
         item.classList.add('dragging');
         e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData('text/plain', draggedFileIds.join(','));
       });
 
       item.addEventListener('dragend', () => {
         item.classList.remove('dragging');
+        draggedFileIds = [];
         document.querySelectorAll('.folder-item').forEach(f => {
           f.classList.remove('drag-over');
         });
@@ -205,28 +216,47 @@ class FileBrowser {
 
       folder.addEventListener('drop', async (e) => {
         e.preventDefault();
+        e.stopPropagation(); // 阻止冒泡到文件夹点击事件
         folder.classList.remove('drag-over');
 
-        if (draggedFileId) {
+        // 获取拖拽的文件ID列表
+        const data = e.dataTransfer.getData('text/plain');
+        const fileIds = data ? data.split(',') : draggedFileIds;
+
+        if (fileIds.length > 0) {
           const targetFolderId = folder.dataset.id;
           try {
-            const res = await fetch(`/files/${draggedFileId}/move`, {
+            // 使用批量移动API
+            const res = await fetch('/files/move-batch', {
               method: 'PATCH',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ folder: targetFolderId })
+              body: JSON.stringify({
+                fileIds: fileIds,
+                folder: targetFolderId || null
+              })
             });
-            const data = await res.json();
-            if (data.success) {
+            const result = await res.json();
+            if (result.success) {
               location.reload();
             } else {
-              alert(data.message || '移动失败');
+              alert(result.message || '移动失败');
             }
           } catch (error) {
             console.error('Move error:', error);
             alert('移动失败');
           }
         }
-        draggedFileId = null;
+      });
+    });
+
+    // 文件夹点击事件 - 只在非拖拽状态下导航
+    document.querySelectorAll('.folder-item[data-type="folder"]').forEach(folder => {
+      folder.addEventListener('click', (e) => {
+        // 如果正在拖拽，不执行导航
+        if (document.querySelector('.file-item.dragging')) return;
+
+        const folderId = folder.dataset.id;
+        this.navigateToFolder(folderId);
       });
     });
   }
@@ -272,27 +302,73 @@ class FileBrowser {
 
       // Clear existing items except root
       treeContainer.innerHTML = `
-        <div class="folder-item root selected" data-id="">
+        <div class="folder-item root selected" data-id="" data-selectable="true">
           <span class="folder-icon">&#128193;</span>
           <span class="folder-name">全部文件</span>
         </div>
       `;
 
-      // Add folders
+      // Add folders as tree structure
+      // Build tree structure
+      const folderMap = {};
+      const rootFolders = [];
+
       folders.data.forEach(folder => {
+        folderMap[folder._id] = { ...folder, children: [] };
+      });
+
+      folders.data.forEach(folder => {
+        if (folder.parent) {
+          const parent = folderMap[folder.parent];
+          if (parent) {
+            parent.children.push(folderMap[folder._id]);
+          } else {
+            rootFolders.push(folderMap[folder._id]);
+          }
+        } else {
+          rootFolders.push(folderMap[folder._id]);
+        }
+      });
+
+      // Render tree recursively
+      const renderNode = (node, level = 0) => {
         const item = document.createElement('div');
         item.className = 'folder-item child';
-        item.dataset.id = folder._id;
+        item.dataset.id = node._id;
+        item.dataset.selectable = 'true';
+        item.style.paddingLeft = `${12 + level * 20}px`;
         item.innerHTML = `
           <span class="folder-icon">&#128194;</span>
-          <span class="folder-name">${folder.name}</span>
+          <span class="folder-name">${node.name}</span>
         `;
-        item.addEventListener('click', () => {
-          document.querySelectorAll('.folder-item').forEach(f => f.classList.remove('selected'));
-          item.classList.add('selected');
+        return item;
+      };
+
+      const renderTree = (nodes, container, level = 0) => {
+        nodes.forEach(node => {
+          const item = renderNode(node, level);
+          item.addEventListener('click', (e) => {
+            e.stopPropagation();
+            document.querySelectorAll('.folder-item').forEach(f => f.classList.remove('selected'));
+            item.classList.add('selected');
+          });
+          container.appendChild(item);
+          if (node.children && node.children.length > 0) {
+            renderTree(node.children, container, level + 1);
+          }
         });
-        treeContainer.appendChild(item);
+      };
+
+      renderTree(rootFolders, treeContainer);
+
+      // Add click handler for root
+      const rootItem = treeContainer.querySelector('.folder-item.root');
+      rootItem?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        document.querySelectorAll('.folder-item').forEach(f => f.classList.remove('selected'));
+        rootItem.classList.add('selected');
       });
+
     } catch (error) {
       console.error('Load folder tree error:', error);
     }
@@ -366,6 +442,34 @@ class FileBrowser {
     if (!newName) {
       alert('文件名不能为空');
       return;
+    }
+
+    // 对于文件，获取原始扩展名并验证
+    if (type === 'file') {
+      // 获取原始文件名（从界面）
+      const fileItem = document.querySelector(`.file-item-row[data-id="${id}"]`);
+      const originalNameEl = fileItem?.querySelector('.file-name');
+      const originalName = originalNameEl?.textContent || '';
+
+      // 提取扩展名
+      const lastDot = originalName.lastIndexOf('.');
+      const originalExt = lastDot > 0 ? originalName.substring(lastDot) : '';
+
+      if (originalExt) {
+        // 检查新名称是否包含扩展名
+        const newLastDot = newName.lastIndexOf('.');
+        const newExt = newLastDot > 0 ? newName.substring(newLastDot) : '';
+
+        if (newExt && newExt.toLowerCase() !== originalExt.toLowerCase()) {
+          alert('不能修改文件扩展名');
+          return;
+        }
+
+        // 如果新名称没有扩展名，自动加上
+        if (!newExt) {
+          // newName = newName + originalExt; // 暂不自动添加，让用户明确输入
+        }
+      }
     }
 
     try {
