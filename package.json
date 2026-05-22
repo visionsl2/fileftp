@@ -1,6 +1,6 @@
 {
   "name": "fileftp",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "文件上传下载浏览系统",
   "main": "server.js",
   "scripts": {

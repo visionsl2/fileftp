@@ -38,7 +38,7 @@
     <div class="header">
       <h1>FileFTP 设计文档</h1>
       <p class="subtitle">文件上传下载浏览系统 - 技术架构与设计说明</p>
-      <div style="margin-top:12px"><span style="background:rgba(255,255,255,0.2);padding:4px 12px;border-radius:12px;font-size:12px">V1.2</span></div>
+      <div style="margin-top:12px"><span style="background:rgba(255,255,255,0.2);padding:4px 12px;border-radius:12px;font-size:12px">V1.2.1</span></div>
     </div>
 
     <div class="content">
@@ -301,6 +301,7 @@ Folder.find({ owner: userId, ... })</code></pre>
       <h2>7. 版本信息</h2>
       <table>
         <tr><th>版本</th><th>日期</th><th>更新内容</th></tr>
+        <tr><td>1.2.1</td><td>2026-05-22</td><td>修复：批量上传多文件 bug、文件夹树缩进、同源 API 认证问题</td></tr>
         <tr><td>1.2.0</td><td>2026-05-21</td><td>新增：真正的缩略图生成（sharp）、文件名重命名、文件移动（多选+拖拽）、分享功能</td></tr>
         <tr><td>1.1.0</td><td>2026-05-21</td><td>新增：图片缩略图预览、拖拽上传、可配置存储路径</td></tr>
         <tr><td>1.0.0</td><td>2026-05-18</td><td>初始版本，包含核心功能</td></tr>

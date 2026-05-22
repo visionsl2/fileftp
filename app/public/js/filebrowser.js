@@ -736,6 +736,9 @@ class FileBrowser {
   }
 
   async uploadFiles(files) {
+    console.log('[Upload] Starting upload, files count:', files.length);
+    console.log('[Upload] File names:', Array.from(files).map(f => f.name));
+
     const uploadPanel = document.getElementById('uploadPanel');
     const uploadList = document.getElementById('uploadList');
 
@@ -744,7 +747,9 @@ class FileBrowser {
 
     const formData = new FormData();
     const urlParams = new URLSearchParams(window.location.search);
-    formData.append('folder', urlParams.get('folder') || '');
+    const folderId = urlParams.get('folder') || '';
+    console.log('[Upload] folder:', folderId || '(root)');
+    formData.append('folder', folderId);
 
     for (let i = 0; i < files.length; i++) {
       formData.append('files', files[i]);
@@ -775,9 +780,12 @@ class FileBrowser {
     });
 
     xhr.addEventListener('load', () => {
+      console.log('[Upload] Response status:', xhr.status);
+      console.log('[Upload] Response:', xhr.responseText);
       try {
         const data = JSON.parse(xhr.responseText);
         if (data.success) {
+          console.log('[Upload] Success!');
           if (statusText) {
             statusText.textContent = '上传成功';
             statusText.className = 'upload-item-status success';
@@ -788,12 +796,14 @@ class FileBrowser {
             location.reload();
           }, 500);
         } else {
+          console.log('[Upload] Failed:', data.message);
           if (statusText) {
             statusText.textContent = data.message || '上传失败';
             statusText.className = 'upload-item-status error';
           }
         }
-      } catch {
+      } catch (e) {
+        console.log('[Upload] Parse error:', e, 'Response:', xhr.responseText);
         if (statusText) {
           statusText.textContent = '上传失败';
           statusText.className = 'upload-item-status error';
@@ -802,6 +812,7 @@ class FileBrowser {
     });
 
     xhr.addEventListener('error', () => {
+      console.log('[Upload] Network error');
       if (statusText) {
         statusText.textContent = '网络错误';
         statusText.className = 'upload-item-status error';

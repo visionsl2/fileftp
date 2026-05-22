@@ -5,7 +5,25 @@
       "Bash(rm -rf C:/sl/code/nodejs/fileftp/uploads/*)",
       "Bash(node server.js)",
       "Bash(curl -s http://localhost:3002/auth/login)",
-      "Bash(node -e ' *)"
+      "Bash(node -e ' *)",
+      "Bash(curl -b cookies.txt http://localhost:3002/folders)",
+      "Bash(python -m json.tool)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:3002/auth/login)",
+      "Bash(curl -s -X POST http://localhost:3002/auth/login -H 'Content-Type: application/json' -d '{\"username\":\"test\",\"password\":\"test\"}')",
+      "Bash(curl -s http://localhost:3002/folders -H \"Authorization: Bearer $\\(curl -s -X POST http://localhost:3002/auth/login -H 'Content-Type: application/json' -d '{\"username\":\"test\",\"password\":\"test\"}')",
+      "Bash(node *)",
+      "WebFetch(domain:minimax-algeng-chat-tts.oss-cn-wulanchabu.aliyuncs.com)",
+      "Bash(dir \"C:\\\\sl\\\\code\\\\nodejs\\\\fileftp\\\\test\\\\t1.png\")",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:3002)",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "Bash(git push *)",
+      "Bash(git config *)",
+      "Bash(netstat -ano)",
+      "Bash(tasklist)",
+      "Bash(curl -s http://localhost:3002)",
+      "Bash(awk '{print $5}')",
+      "Bash(xargs -I{} taskkill //F //PID {})"
     ]
   }
 }

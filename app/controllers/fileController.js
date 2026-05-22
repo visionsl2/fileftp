@@ -103,6 +103,12 @@ const fileController = {
     }
 
     // 解析上传请求
+    console.log('[Upload] Parsing request...');
+
+    // 手动收集文件（formidable v2 多文件有 bug，用事件收集）
+    const collectedFiles = [];
+    const fileFilter = require('../middlewares/fileFilter');
+
     const parsed = await new Promise((resolve, reject) => {
       const form = formidable({
         uploadDir: uploadConfig.uploadDir,
@@ -112,18 +118,25 @@ const fileController = {
         maxTotalFileSize: uploadConfig.maxFileSize * uploadConfig.maxFilesPerRequest
       });
 
-      // 文件类型过滤
-      const fileFilter = require('../middlewares/fileFilter');
       form.on('file', (formName, file) => {
+        console.log('[Upload] Formidable received file:', file.originalFilename || file.newFilename);
         const result = fileFilter.checkExtension(file.originalFilename || file.newFilename || '');
         if (!result.allowed) {
           file._blocked = true;
+          console.log('[Upload] File blocked:', file.originalFilename);
         }
+        collectedFiles.push(file);
       });
 
       form.parse(req, (err, fields, files) => {
-        if (err) reject(err);
-        else resolve({ fields, files });
+        if (err) {
+          console.log('[Upload] Parse error:', err);
+          reject(err);
+        } else {
+          console.log('[Upload] Parsed fields:', Object.keys(fields));
+          console.log('[Upload] Collected files count:', collectedFiles.length);
+          resolve({ fields, files, collectedFiles });
+        }
       });
     });
 
@@ -132,18 +145,18 @@ const fileController = {
       ? parsed.fields.folder[0]
       : (parsed.fields.folder || '');
     const folderId = folderIdRaw && /^[a-fA-F0-9]{24}$/.test(folderIdRaw) ? folderIdRaw : null;
+    console.log('[Upload] folderId:', folderId);
     const user = await User.findById(userId);
 
-    // 处理文件列表
-    let fileList = parsed.files.files;
-    if (!Array.isArray(fileList)) {
-      fileList = fileList ? [fileList] : [];
-    }
+    // 使用手动收集的文件列表（避免 formidable v2 的多文件 bug）
+    const fileList = parsed.collectedFiles || [];
+    console.log('[Upload] Final fileList length:', fileList.length);
 
     // 过滤被阻止的文件
     const validFiles = fileList.filter(f => !f._blocked);
-
+    console.log('[Upload] Valid files:', validFiles.length, '/', fileList.length);
     if (validFiles.length === 0) {
+      console.log('[Upload] All files blocked or empty');
       return res.status(400).json({
         success: false,
         message: '禁止上传该类型的文件或没有上传文件'
@@ -168,9 +181,12 @@ const fileController = {
 
     // 处理每个文件
     for (const file of validFiles) {
+      console.log('[Upload] Processing file:', file.originalFilename || file.newFilename);
       try {
         const ext = path.extname(file.originalFilename || file.newFilename);
+        console.log('[Upload] Extension:', ext);
         const storage = await storageService.processUploadedFile(file.filepath, userId, folderId, ext);
+        console.log('[Upload] Storage processed:', storage.relativePath);
 
         const fileDoc = new File({
           filename: storage.relativePath,
@@ -184,6 +200,7 @@ const fileController = {
         });
 
         await fileDoc.save();
+        console.log('[Upload] Saved to DB:', fileDoc._id);
 
         // 如果是图片文件，生成缩略图
         if (storageService.isImage(ext)) {
