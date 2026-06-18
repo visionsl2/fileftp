@@ -103,63 +103,87 @@ const fileController = {
     }
 
     // 解析上传请求
-    console.log('[Upload] Parsing request...');
+    let collectedFiles = [];
+    let parsed;
 
-    // 手动收集文件（formidable v2 多文件有 bug，用事件收集）
-    const collectedFiles = [];
-    const fileFilter = require('../middlewares/fileFilter');
+    try {
+      // 手动收集文件（formidable v2 多文件有 bug，用事件收集）
+      const fileFilter = require('../middlewares/fileFilter');
 
-    const parsed = await new Promise((resolve, reject) => {
-      const form = formidable({
-        uploadDir: uploadConfig.uploadDir,
-        keepExtensions: true,
-        maxFileSize: uploadConfig.maxFileSize,
-        maxFiles: uploadConfig.maxFilesPerRequest,
-        maxTotalFileSize: uploadConfig.maxFileSize * uploadConfig.maxFilesPerRequest
-      });
+      parsed = await new Promise((resolve, reject) => {
+        const form = formidable({
+          uploadDir: uploadConfig.uploadDir,
+          keepExtensions: true,
+          maxFileSize: uploadConfig.maxFileSize,
+          maxFiles: uploadConfig.maxFilesPerRequest,
+          maxTotalFileSize: uploadConfig.maxFileSize * uploadConfig.maxFilesPerRequest
+        });
 
-      form.on('file', (formName, file) => {
-        console.log('[Upload] Formidable received file:', file.originalFilename || file.newFilename);
-        const result = fileFilter.checkExtension(file.originalFilename || file.newFilename || '');
-        if (!result.allowed) {
-          file._blocked = true;
-          console.log('[Upload] File blocked:', file.originalFilename);
-        }
-        collectedFiles.push(file);
-      });
+        form.on('file', (formName, file) => {
+          const result = fileFilter.checkExtension(file.originalFilename || file.newFilename || '');
+          if (!result.allowed) {
+            file._blocked = true;
+          }
+          collectedFiles.push(file);
+        });
 
-      form.parse(req, (err, fields, files) => {
-        if (err) {
-          console.log('[Upload] Parse error:', err);
+        // 捕获请求中断（如手机端浏览器取消上传）
+        form.on('error', (err) => {
           reject(err);
-        } else {
-          console.log('[Upload] Parsed fields:', Object.keys(fields));
-          console.log('[Upload] Collected files count:', collectedFiles.length);
-          resolve({ fields, files, collectedFiles });
-        }
-      });
-    });
+        });
 
-    // formidable v2 returns fields as plain values (not arrays), so we need to handle both cases
+        form.parse(req, (err, fields, files) => {
+          if (err) {
+            reject(err);
+          } else {
+            resolve({ fields, files });
+          }
+        });
+      });
+    } catch (parseErr) {
+      console.error('[Upload] Parse error:', parseErr.message);
+
+      // 清理已上传的临时文件
+      for (const f of collectedFiles) {
+        try { await storageService.deleteFile(f.filepath); } catch {}
+      }
+
+      // 客户端取消请求时不返回错误（连接已断开）
+      if (parseErr.code === 1002) {
+        return; // Request aborted, no response needed
+      }
+
+      return res.status(500).json({
+        success: false,
+        message: '上传中断，请重试'
+      });
+    }
+
+    // formidable v2 returns fields as plain values (not arrays)
     const folderIdRaw = Array.isArray(parsed.fields.folder)
       ? parsed.fields.folder[0]
       : (parsed.fields.folder || '');
     const folderId = folderIdRaw && /^[a-fA-F0-9]{24}$/.test(folderIdRaw) ? folderIdRaw : null;
-    console.log('[Upload] folderId:', folderId);
-    const user = await User.findById(userId);
 
-    // 使用手动收集的文件列表（避免 formidable v2 的多文件 bug）
-    const fileList = parsed.collectedFiles || [];
-    console.log('[Upload] Final fileList length:', fileList.length);
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ success: false, message: '用户不存在' });
+    }
+
+    if (collectedFiles.length === 0) {
+      return res.status(400).json({ success: false, message: '没有上传文件' });
+    }
 
     // 过滤被阻止的文件
-    const validFiles = fileList.filter(f => !f._blocked);
-    console.log('[Upload] Valid files:', validFiles.length, '/', fileList.length);
+    const validFiles = collectedFiles.filter(f => !f._blocked);
     if (validFiles.length === 0) {
-      console.log('[Upload] All files blocked or empty');
+      // 清理临时文件
+      for (const f of collectedFiles) {
+        try { await storageService.deleteFile(f.filepath); } catch {}
+      }
       return res.status(400).json({
         success: false,
-        message: '禁止上传该类型的文件或没有上传文件'
+        message: '禁止上传该类型的文件'
       });
     }
 
@@ -181,12 +205,9 @@ const fileController = {
 
     // 处理每个文件
     for (const file of validFiles) {
-      console.log('[Upload] Processing file:', file.originalFilename || file.newFilename);
       try {
         const ext = path.extname(file.originalFilename || file.newFilename);
-        console.log('[Upload] Extension:', ext);
         const storage = await storageService.processUploadedFile(file.filepath, userId, folderId, ext);
-        console.log('[Upload] Storage processed:', storage.relativePath);
 
         const fileDoc = new File({
           filename: storage.relativePath,
@@ -194,13 +215,12 @@ const fileController = {
           mimeType: file.mimetype,
           extension: ext.toLowerCase(),
           size: file.size,
-          storage: { path: storage.path },
+          storage: { path: storage.relativePath },
           folder: folderId,
           owner: userId
         });
 
         await fileDoc.save();
-        console.log('[Upload] Saved to DB:', fileDoc._id);
 
         // 如果是图片文件，生成缩略图
         if (storageService.isImage(ext)) {
@@ -210,10 +230,29 @@ const fileController = {
               fileDoc._id.toString(),
               userId
             );
-            fileDoc.thumb = thumbInfo;
-            await fileDoc.save();
+            if (thumbInfo) {
+              fileDoc.thumb = thumbInfo;
+              await fileDoc.save();
+            }
           } catch (thumbErr) {
             console.error('Generate thumbnail error:', thumbErr);
+          }
+        }
+
+        // 如果是视频文件，生成视频缩略图
+        if (storageService.isVideo(ext)) {
+          try {
+            const thumbInfo = await storageService.generateVideoThumbnail(
+              storage.path,
+              fileDoc._id.toString(),
+              userId
+            );
+            if (thumbInfo) {
+              fileDoc.thumb = thumbInfo;
+              await fileDoc.save();
+            }
+          } catch (thumbErr) {
+            console.error('Generate video thumbnail error:', thumbErr);
           }
         }
 
@@ -279,7 +318,7 @@ const fileController = {
       res.setHeader('Content-Length', file.size);
 
       // 流式传输文件
-      const readStream = storageService.createReadStream(file.storage.path);
+      const readStream = storageService.createReadStream(storageService.resolvePath(file.storage.path));
       readStream.on('error', (err) => {
         console.error('Stream error:', err);
         if (!res.headersSent) {
@@ -324,9 +363,9 @@ const fileController = {
       });
 
       // 删除物理文件
-      await storageService.deleteFile(file.storage.path);
+      await storageService.deleteFile(storageService.resolvePath(file.storage.path));
 
-      // 删除缩略图
+      // 删除缩略图（deleteThumbnail 内部已调用 resolvePath）
       if (file.thumb && file.thumb.path) {
         await storageService.deleteThumbnail(file.thumb.path);
       }
@@ -390,10 +429,12 @@ const fileController = {
         return res.status(404).json({ success: false, message: '文件不存在' });
       }
 
-      // 检查是否为图片类型
+      // 检查是否为图片或视频类型（视频也可能有缩略图）
       const imageExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.svg', '.ico'];
-      if (!imageExtensions.includes(file.extension.toLowerCase())) {
-        return res.status(400).json({ success: false, message: '不是图片文件' });
+      const videoExtensions = ['.mp4', '.avi', '.mov', '.wmv', '.flv', '.mkv', '.webm', '.m4v', '.3gp'];
+      if (!imageExtensions.includes(file.extension.toLowerCase()) &&
+          !videoExtensions.includes(file.extension.toLowerCase())) {
+        return res.status(400).json({ success: false, message: '不支持缩略图' });
       }
 
       // 设置缓存头（1小时）
@@ -401,9 +442,9 @@ const fileController = {
       res.setHeader('Content-Type', 'image/jpeg');
 
       // 如果有缩略图，返回缩略图；否则返回原图
-      let filePath = file.storage.path;
+      let filePath = storageService.resolvePath(file.storage.path);
       if (file.thumb && file.thumb.path) {
-        filePath = file.thumb.path;
+        filePath = storageService.resolvePath(file.thumb.path);
       }
 
       const readStream = storageService.createReadStream(filePath);
@@ -449,7 +490,7 @@ const fileController = {
       res.setHeader('Content-Type', file.mimeType);
       res.setHeader('Content-Length', file.size);
 
-      const readStream = storageService.createReadStream(file.storage.path);
+      const readStream = storageService.createReadStream(storageService.resolvePath(file.storage.path));
       readStream.on('error', (err) => {
         console.error('Preview stream error:', err);
         if (!res.headersSent) {
@@ -460,6 +501,76 @@ const fileController = {
     } catch (error) {
       console.error('getPreview error:', error);
       res.status(500).json({ success: false, message: '预览加载失败' });
+    }
+  },
+
+  /**
+   * 流媒体播放（支持 HTTP Range 请求，用于视频在线播放）
+   *
+   * 浏览器播放视频时会发送 Range 请求来实现进度条拖拽
+   */
+  streamVideo: async (req, res) => {
+    try {
+      const userId = req.userId;
+
+      const file = await File.findOne({
+        _id: req.params.id,
+        owner: userId,
+        isDeleted: false
+      });
+
+      if (!file) {
+        return res.status(404).json({ success: false, message: '文件不存在' });
+      }
+
+      const filePath = storageService.resolvePath(file.storage.path);
+      const fs = require('fs');
+      const stat = await fs.promises.stat(filePath);
+      const fileSize = stat.size;
+      const range = req.headers.range;
+
+      if (range) {
+        // 解析 Range 请求头 "bytes=start-end"
+        const parts = range.replace(/bytes=/, '').split('-');
+        const start = parseInt(parts[0], 10);
+        const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
+        const chunkSize = end - start + 1;
+
+        res.writeHead(206, {
+          'Content-Range': `bytes ${start}-${end}/${fileSize}`,
+          'Accept-Ranges': 'bytes',
+          'Content-Length': chunkSize,
+          'Content-Type': file.mimeType
+        });
+
+        const stream = fs.createReadStream(filePath, { start, end });
+        stream.pipe(res);
+        stream.on('error', (err) => {
+          console.error('Video stream error:', err);
+          if (!res.headersSent) {
+            res.status(500).json({ success: false, message: '播放失败' });
+          }
+        });
+      } else {
+        // 无 Range 请求则返回完整文件
+        res.writeHead(200, {
+          'Content-Length': fileSize,
+          'Content-Type': file.mimeType,
+          'Accept-Ranges': 'bytes'
+        });
+
+        const stream = fs.createReadStream(filePath);
+        stream.pipe(res);
+        stream.on('error', (err) => {
+          console.error('Video stream error:', err);
+          if (!res.headersSent) {
+            res.status(500).json({ success: false, message: '播放失败' });
+          }
+        });
+      }
+    } catch (error) {
+      console.error('streamVideo error:', error);
+      res.status(500).json({ success: false, message: '播放失败' });
     }
   },
 

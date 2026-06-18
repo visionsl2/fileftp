@@ -137,7 +137,7 @@ const apiController = {
         mimeType: file.mimetype,
         extension: path.extname(file.originalname).toLowerCase(),
         size: file.size,
-        storage: { path: storage.path },
+        storage: { path: storage.relativePath },
         folder: folder || null,
         owner: user._id
       });
@@ -312,7 +312,7 @@ const apiController = {
       res.setHeader('Content-Length', file.size);
 
       // 流式传输
-      const readStream = storageService.createReadStream(file.storage.path);
+      const readStream = storageService.createReadStream(storageService.resolvePath(file.storage.path));
       readStream.pipe(res);
     } catch (error) {
       console.error('API download error:', error);
@@ -357,7 +357,7 @@ const apiController = {
       });
 
       // 删除物理文件
-      await storageService.deleteFile(file.storage.path);
+      await storageService.deleteFile(storageService.resolvePath(file.storage.path));
 
       res.json({ success: true });
     } catch (error) {

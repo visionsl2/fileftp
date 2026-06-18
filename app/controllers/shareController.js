@@ -208,7 +208,7 @@ const shareController = {
       res.setHeader('Content-Length', file.size);
 
       // 流式传输文件
-      const readStream = storageService.createReadStream(file.storage.path);
+      const readStream = storageService.createReadStream(storageService.resolvePath(file.storage.path));
       readStream.on('error', (err) => {
         console.error('Stream error:', err);
         if (!res.headersSent) {
@@ -259,9 +259,9 @@ const shareController = {
       res.setHeader('Content-Type', 'image/jpeg');
 
       // 返回缩略图或原图
-      let filePath = file.storage.path;
+      let filePath = storageService.resolvePath(file.storage.path);
       if (file.thumb && file.thumb.path) {
-        filePath = file.thumb.path;
+        filePath = storageService.resolvePath(file.thumb.path);
       }
 
       const readStream = storageService.createReadStream(filePath);

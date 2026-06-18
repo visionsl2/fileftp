@@ -8,13 +8,31 @@
  * - 错误处理
  */
 
-require('dotenv').config();
+const path = require('path');
+const fs = require('fs');
+
+// .env 加载：pkg 打包后从可执行文件同目录加载，开发环境从 cwd 加载
+const envPaths = [
+  path.join(path.dirname(process.execPath), '.env'),
+  path.resolve('.env')
+];
+let envLoaded = false;
+for (const envPath of envPaths) {
+  if (fs.existsSync(envPath)) {
+    require('dotenv').config({ path: envPath });
+    console.log('[Config] Loaded .env from:', envPath);
+    envLoaded = true;
+    break;
+  }
+}
+if (!envLoaded) {
+  console.log('[Config] No .env file found, using defaults');
+}
 
 const express = require('express');
 const session = require('express-session');
 const cors = require('cors');
 const cookieParser = require('cookie-parser');
-const path = require('path');
 
 const connectDB = require('./app/config/database');
 

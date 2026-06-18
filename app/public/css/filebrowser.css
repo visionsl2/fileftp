@@ -913,3 +913,45 @@ body {
   outline: none;
   border-color: #667eea;
 }
+
+/* 视频播放器 */
+.video-player {
+  max-width: 90%;
+  max-height: 75vh;
+  border-radius: 4px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+  background: #000;
+}
+
+/* 视频缩略图播放按钮覆盖层 */
+.video-play-overlay {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 36px;
+  height: 36px;
+  background: rgba(0, 0, 0, 0.6);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  transition: background 0.2s;
+}
+
+.file-thumb-container:hover .video-play-overlay {
+  background: rgba(102, 126, 234, 0.85);
+}
+
+.video-play-overlay svg {
+  width: 18px;
+  height: 18px;
+  fill: white;
+  margin-left: 2px;
+}
+
+/* video 缩略图容器需要 relative 定位 */
+.file-thumb-container[data-type="video"] {
+  position: relative;
+}

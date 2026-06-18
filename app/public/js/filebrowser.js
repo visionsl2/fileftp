@@ -24,6 +24,7 @@ class FileBrowser {
     this.bindDragMove();
     this.initDragDrop();
     this.initImagePreview();
+    this.initVideoPlayer();
     this.initModals();
     this.applyViewMode();
   }
@@ -300,26 +301,13 @@ class FileBrowser {
 
   async loadFolderTree() {
     try {
-      // 读取所有 cookie
-      const cookies = document.cookie;
-      console.log('All cookies:', cookies);
-
-      // 直接用 fetch 发送 same-origin 请求，Cookie 会自动发送
       const res = await fetch('/folders', {
-        headers: {
-          'Accept': 'application/json'
-        }
+        headers: { 'Accept': 'application/json' }
       });
       const folders = await res.json();
-      console.log('Folders API response:', folders);
 
       const treeContainer = document.getElementById('folderTree');
-      if (!treeContainer || !folders || !folders.data) {
-        console.log('Skip: missing container or folders');
-        return;
-      }
-
-      console.log('Building tree with', folders.data.length, 'folders');
+      if (!treeContainer || !folders || !folders.data) return;
 
       // Clear existing items except root
       treeContainer.innerHTML = `
@@ -336,7 +324,6 @@ class FileBrowser {
 
       folders.data.forEach(folder => {
         folderMap[folder._id] = { ...folder, children: [] };
-        console.log('  Added to map:', folder.name, 'parent:', folder.parent);
       });
 
       folders.data.forEach(folder => {
@@ -381,7 +368,6 @@ class FileBrowser {
       };
 
       renderTree(rootFolders, treeContainer);
-      console.log('Tree rendered, total items:', treeContainer.querySelectorAll('.folder-item').length);
 
       // Add click handler for root
       const rootItem = treeContainer.querySelector('.folder-item.root');
@@ -544,8 +530,12 @@ class FileBrowser {
 
       if (data.success && data.shareToken) {
         const shareUrl = `${window.location.origin}/share/${data.shareToken}`;
-        prompt('分享链接已复制到剪贴板：', shareUrl);
-        navigator.clipboard.writeText(shareUrl).catch(() => {});
+        const copied = await this.copyToClipboard(shareUrl);
+        if (copied) {
+          alert('分享链接已复制到剪贴板！');
+        } else {
+          prompt('请手动复制分享链接：', shareUrl);
+        }
         this.hideShareModal();
       } else {
         alert(data.message || '创建分享失败');
@@ -597,7 +587,8 @@ class FileBrowser {
 
     if (!modal) return;
 
-    document.querySelectorAll('.file-thumb-container').forEach(container => {
+    // 排除视频缩略图容器（视频由 initVideoPlayer 处理）
+    document.querySelectorAll('.file-thumb-container:not([data-type="video"])').forEach(container => {
       container.addEventListener('click', () => {
         const fullUrl = container.dataset.fullUrl;
         const fileId = container.closest('.file-item')?.dataset.id;
@@ -628,6 +619,82 @@ class FileBrowser {
         modal.classList.remove('show');
       }
     });
+  }
+
+  initVideoPlayer() {
+    const modal = document.getElementById('videoPlayerModal');
+    const videoPlayer = document.getElementById('videoPlayer');
+    const closeBtn = document.getElementById('closeVideoPlayer');
+    const videoFileName = document.getElementById('videoFileName');
+    const downloadBtn = document.getElementById('videoDownloadBtn');
+
+    if (!modal || !videoPlayer) return;
+
+    // 视频缩略图点击 → 打开播放器
+    document.querySelectorAll('.file-thumb-container[data-type="video"]').forEach(container => {
+      container.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const streamUrl = container.dataset.fullUrl;
+        const fileItem = container.closest('.file-item');
+        const fileId = fileItem?.dataset.id;
+        const fileName = fileItem?.querySelector('.file-name')?.textContent;
+
+        if (streamUrl) {
+          videoPlayer.src = streamUrl;
+          if (videoFileName) videoFileName.textContent = fileName || '';
+          if (downloadBtn) downloadBtn.href = '/files/' + fileId + '/download';
+          modal.classList.add('show');
+          videoPlayer.play().catch(() => {});
+        }
+      });
+    });
+
+    // 关闭按钮
+    closeBtn?.addEventListener('click', () => {
+      videoPlayer.pause();
+      videoPlayer.src = '';
+      modal.classList.remove('show');
+    });
+
+    // 点击背景关闭
+    modal.addEventListener('click', (e) => {
+      if (e.target === modal) {
+        videoPlayer.pause();
+        videoPlayer.src = '';
+        modal.classList.remove('show');
+      }
+    });
+
+    // ESC 关闭
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && modal.classList.contains('show')) {
+        videoPlayer.pause();
+        videoPlayer.src = '';
+        modal.classList.remove('show');
+      }
+    });
+  }
+
+  async copyToClipboard(text) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch {
+      // 降级方案：非 HTTPS 环境或权限不足时使用 execCommand
+      try {
+        const textarea = document.createElement('textarea');
+        textarea.value = text;
+        textarea.style.position = 'fixed';
+        textarea.style.left = '-9999px';
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textarea);
+        return true;
+      } catch {
+        return false;
+      }
+    }
   }
 
   applyViewMode() {
@@ -736,9 +803,6 @@ class FileBrowser {
   }
 
   async uploadFiles(files) {
-    console.log('[Upload] Starting upload, files count:', files.length);
-    console.log('[Upload] File names:', Array.from(files).map(f => f.name));
-
     const uploadPanel = document.getElementById('uploadPanel');
     const uploadList = document.getElementById('uploadList');
 
@@ -748,7 +812,6 @@ class FileBrowser {
     const formData = new FormData();
     const urlParams = new URLSearchParams(window.location.search);
     const folderId = urlParams.get('folder') || '';
-    console.log('[Upload] folder:', folderId || '(root)');
     formData.append('folder', folderId);
 
     for (let i = 0; i < files.length; i++) {
@@ -780,12 +843,9 @@ class FileBrowser {
     });
 
     xhr.addEventListener('load', () => {
-      console.log('[Upload] Response status:', xhr.status);
-      console.log('[Upload] Response:', xhr.responseText);
       try {
         const data = JSON.parse(xhr.responseText);
         if (data.success) {
-          console.log('[Upload] Success!');
           if (statusText) {
             statusText.textContent = '上传成功';
             statusText.className = 'upload-item-status success';
@@ -796,14 +856,12 @@ class FileBrowser {
             location.reload();
           }, 500);
         } else {
-          console.log('[Upload] Failed:', data.message);
           if (statusText) {
             statusText.textContent = data.message || '上传失败';
             statusText.className = 'upload-item-status error';
           }
         }
-      } catch (e) {
-        console.log('[Upload] Parse error:', e, 'Response:', xhr.responseText);
+      } catch {
         if (statusText) {
           statusText.textContent = '上传失败';
           statusText.className = 'upload-item-status error';
@@ -812,7 +870,6 @@ class FileBrowser {
     });
 
     xhr.addEventListener('error', () => {
-      console.log('[Upload] Network error');
       if (statusText) {
         statusText.textContent = '网络错误';
         statusText.className = 'upload-item-status error';

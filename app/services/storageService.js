@@ -17,11 +17,32 @@ const fs = require('fs');
 const fsp = require('fs').promises;
 const path = require('path');
 const crypto = require('crypto');
-const sharp = require('sharp');
+// sharp 是可选依赖（pkg 打包时可能无法包含原生模块）
+let sharp;
+try {
+  sharp = require('sharp');
+} catch (e) {
+  console.warn('[Storage] sharp not available, thumbnail generation disabled');
+}
+// ffmpeg 是可选依赖（NAS 可能未安装）
+let ffmpeg;
+try {
+  ffmpeg = require('fluent-ffmpeg');
+  // 如果配置了 FFMPEG_PATH，显式设置路径
+  if (process.env.FFMPEG_PATH) {
+    ffmpeg.setFfmpegPath(process.env.FFMPEG_PATH);
+    console.log('[Storage] ffmpeg path:', process.env.FFMPEG_PATH);
+  }
+} catch (e) {
+  console.warn('[Storage] ffmpeg not available, video thumbnail generation disabled');
+}
 const uploadConfig = require('../config/upload');
 
 // 图片扩展名列表
 const IMAGE_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.svg', '.ico'];
+
+// 视频扩展名列表
+const VIDEO_EXTENSIONS = ['.mp4', '.avi', '.mov', '.wmv', '.flv', '.mkv', '.webm', '.m4v', '.3gp'];
 
 class StorageService {
   /**
@@ -213,6 +234,15 @@ class StorageService {
   }
 
   /**
+   * 检查是否为视频文件
+   * @param {string} extension - 文件扩展名
+   * @returns {boolean}
+   */
+  isVideo(extension) {
+    return VIDEO_EXTENSIONS.includes(extension.toLowerCase());
+  }
+
+  /**
    * 生成缩略图
    * @param {string} filePath - 原图路径
    * @param {string} fileId - 文件ID
@@ -220,6 +250,12 @@ class StorageService {
    * @returns {Promise<{path: string, width: number, height: number}>}
    */
   async generateThumbnail(filePath, fileId, userId) {
+    // sharp 不可用时跳过缩略图生成
+    if (!sharp) {
+      console.warn('[Storage] Skipping thumbnail (sharp not available):', fileId);
+      return null;
+    }
+
     // 缩略图尺寸
     const THUMB_WIDTH = 200;
     const THUMB_HEIGHT = 200;
@@ -242,11 +278,12 @@ class StorageService {
         .jpeg({ quality: 80 })
         .toFile(thumbPath);
 
-      // 统一路径分隔符
+      // 统一路径分隔符，返回相对路径（相对于 uploadDir）
       const normalizedPath = thumbPath.replace(/\\/g, '/');
+      const relativePath = path.relative(uploadConfig.uploadDir, normalizedPath).replace(/\\/g, '/');
 
       return {
-        path: normalizedPath,
+        path: relativePath,
         width: metadata.width,
         height: metadata.height
       };
@@ -257,16 +294,74 @@ class StorageService {
   }
 
   /**
+   * 生成视频缩略图（截取第1秒帧）
+   * @param {string} filePath - 视频文件路径（绝对路径）
+   * @param {string} fileId - 文件ID
+   * @param {string} userId - 用户ID
+   * @returns {Promise<{path: string, width: number, height: number}>|null}
+   */
+  async generateVideoThumbnail(filePath, fileId, userId) {
+    if (!ffmpeg) {
+      console.warn('[Storage] Skipping video thumbnail (ffmpeg not available):', fileId);
+      return null;
+    }
+
+    const thumbDir = path.join(uploadConfig.uploadDir, userId.toString(), 'thumbs');
+    await this.ensureDir(thumbDir);
+
+    const thumbFilename = `${fileId}_thumb.jpg`;
+    const thumbPath = path.join(thumbDir, thumbFilename);
+
+    return new Promise((resolve) => {
+      ffmpeg(filePath)
+        .screenshots({
+          timestamps: ['00:00:01'],
+          filename: thumbFilename,
+          folder: thumbDir,
+          size: '320x240'
+        })
+        .on('end', () => {
+          const normalizedPath = thumbPath.replace(/\\/g, '/');
+          const relativePath = path.relative(uploadConfig.uploadDir, normalizedPath).replace(/\\/g, '/');
+          resolve({ path: relativePath, width: 320, height: 240 });
+        })
+        .on('error', (err) => {
+          console.warn('[Storage] Video thumbnail failed:', err.message);
+          // 尝试删除可能损坏的输出
+          try { fs.unlinkSync(thumbPath); } catch {}
+          resolve(null);
+        });
+    });
+  }
+
+  /**
    * 删除缩略图
    * @param {string} thumbPath - 缩略图路径
    */
   async deleteThumbnail(thumbPath) {
     if (!thumbPath) return;
     try {
-      await fsp.unlink(thumbPath);
+      await fsp.unlink(this.resolvePath(thumbPath));
     } catch {
       // 忽略删除失败
     }
+  }
+
+  /**
+   * 还原物理路径（从数据库中存储的相对路径拼接 uploadDir）
+   *
+   * 兼容旧数据：如果已是绝对路径则直接返回，不做拼接
+   *
+   * @param {string} storedPath - 数据库中存储的路径（相对或绝对）
+   * @returns {string} 可用的物理绝对路径
+   */
+  resolvePath(storedPath) {
+    if (!storedPath) return storedPath;
+    // 已是绝对路径（Unix 以 / 开头，Windows 以盘符如 C:/ 开头）
+    if (path.isAbsolute(storedPath) || /^[A-Za-z]:[/\\]/.test(storedPath)) {
+      return storedPath;
+    }
+    return path.join(uploadConfig.uploadDir, storedPath);
   }
 }
 

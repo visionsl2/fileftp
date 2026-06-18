@@ -15,6 +15,7 @@ router.get('/:id', fileController.getFileInfo);
 router.get('/:id/download', fileController.downloadFile);
 router.get('/:id/thumb', fileController.getThumbnail);
 router.get('/:id/preview', fileController.getPreview);
+router.get('/:id/stream', fileController.streamVideo);
 
 // 文件操作
 router.patch('/:id/rename', fileController.renameFile);
