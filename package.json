@@ -1,6 +1,6 @@
 {
   "name": "fileftp",
-  "version": "1.2.3",
+  "version": "2.0.0",
   "description": "文件上传下载浏览系统",
   "main": "server.js",
   "scripts": {
@@ -26,6 +26,9 @@
   "author": "",
   "license": "MIT",
   "dependencies": {
+    "@tensorflow-models/mobilenet": "^2.1.1",
+    "@tensorflow/tfjs": "^4.22.0",
+    "@tensorflow/tfjs-backend-cpu": "^4.22.0",
     "bcryptjs": "2.4.3",
     "cookie-parser": "1.4.6",
     "cors": "2.8.5",

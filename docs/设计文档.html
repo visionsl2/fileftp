@@ -36,16 +36,16 @@
 <body>
   <div class="container">
     <div class="header">
-      <h1>FileFTP 设计文档</h1>
+      <h1>赛博网盘 设计文档</h1>
       <p class="subtitle">文件上传下载浏览系统 - 技术架构与设计说明</p>
-      <div style="margin-top:12px"><span style="background:rgba(255,255,255,0.2);padding:4px 12px;border-radius:12px;font-size:12px">V1.2.3</span></div>
+      <div style="margin-top:12px"><span style="background:rgba(255,255,255,0.2);padding:4px 12px;border-radius:12px;font-size:12px">V2.0.0</span></div>
     </div>
 
     <div class="content">
       <h2>1. 系统概述</h2>
 
       <div class="section">
-        <p>FileFTP 是一个基于 Node.js + Express + MongoDB 的文件管理系统，提供以下核心功能：</p>
+        <p>赛博网盘 是一个基于 Node.js + Express + MongoDB 的文件管理系统，提供以下核心功能：</p>
         <ul>
           <li><strong>用户认证</strong> - 注册、登录、登出，支持 JWT Token 和 Session 双重认证</li>
           <li><strong>文件上传</strong> - 单文件/多文件上传，实时进度显示，支持大文件分片上传</li>
@@ -301,6 +301,7 @@ Folder.find({ owner: userId, ... })</code></pre>
       <h2>7. 版本信息</h2>
       <table>
         <tr><th>版本</th><th>日期</th><th>更新内容</th></tr>
+        <tr><td>2.0.0</td><td>2026-06-18</td><td>重大更新：品牌更名为"赛博网盘"。新增 AI 智能分析（多模态大模型图片/视频识别）、自动分类归档、智能重命名、AI Token 用量统计、管理后台</td></tr>
         <tr><td>1.2.3</td><td>2026-06-18</td><td>新增：视频在线播放（流媒体+HTTP Range）、视频缩略图（ffmpeg 自动截帧）、分享链接剪贴板复制修复</td></tr>
         <tr><td>1.2.2</td><td>2026-06-16</td><td>修复：数据库存储路径从绝对路径改为相对路径，解决服务器迁移后附件不可访问问题</td></tr>
         <tr><td>1.2.1</td><td>2026-05-22</td><td>修复：批量上传多文件 bug、文件夹树缩进、同源 API 认证问题</td></tr>

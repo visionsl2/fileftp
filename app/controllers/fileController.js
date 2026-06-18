@@ -64,12 +64,16 @@ const fileController = {
       }
 
       // 渲染文件浏览器页面
+      // AI 配额信息
+      const aiQuota = await getAiQuota(user);
+
       res.render('files/browser', {
         files,
         folders,
         currentFolder: folder || null,
         breadcrumb,
         user,
+        aiQuota,
         title: '我的文件',
         formatFileSize: helpers.formatFileSize,
         formatDate: helpers.formatDate,
@@ -256,6 +260,47 @@ const fileController = {
           }
         }
 
+        // AI 自动分类（图片 + 视频）
+        const aiAutoClassify = process.env.AI_AUTO_CLASSIFY !== 'false';
+        const aiMode = process.env.AI_CLASSIFY_MODE || 'auto';
+        const shouldAnalyze = aiAutoClassify && aiMode === 'auto' &&
+          (storageService.isImage(ext) || storageService.isVideo(ext));
+        // 配额检查
+        const aiQuotaOk = shouldAnalyze ? await checkAiQuota(user) : false;
+        if (shouldAnalyze && aiQuotaOk) {
+          try {
+            const aiService = require('../services/aiService');
+            const analysis = storageService.isVideo(ext)
+              ? await aiService.analyzeVideo(storage.path)
+              : await aiService.analyzeImage(storage.path);
+            if (analysis && analysis.labels.length > 0) {
+              fileDoc.aiAnalysis = {
+                analyzed: true,
+                analyzedAt: new Date(),
+                labels: analysis.labels,
+                category: analysis.category,
+                confidence: analysis.confidence,
+                summary: analysis.summary || '',
+                objects: analysis.objects || [],
+                scene: analysis.scene || '',
+                text: analysis.text || '',
+                model: process.env.AI_MODEL || 'gpt-4o',
+                promptTokens: analysis.promptTokens || 0,
+                completionTokens: analysis.completionTokens || 0,
+                totalTokens: analysis.totalTokens || 0
+              };
+              await fileDoc.save();
+
+              // 自动归类 + 重命名
+              if (process.env.AI_AUTO_ORGANIZE !== 'false') {
+                await autoOrganizeFile(fileDoc, analysis, userId, storageService);
+              }
+            }
+          } catch (aiErr) {
+            console.warn('[AI] Analysis failed for', fileDoc._id, ':', aiErr.message);
+          }
+        }
+
         uploadedFiles.push(fileDoc);
       } catch (fileErr) {
         console.error('Save file error:', fileErr);
@@ -268,14 +313,29 @@ const fileController = {
       $inc: { storageUsed: totalSize }
     });
 
-    res.json({
-      success: true,
-      files: uploadedFiles.map(f => ({
+    // 填充文件夹路径信息
+    const resultFiles = [];
+    for (const f of uploadedFiles) {
+      let folderPath = '';
+      if (f.folder) {
+        const folder = await Folder.findById(f.folder).lean();
+        if (folder) folderPath = folder.path || '/' + folder.name;
+      }
+      resultFiles.push({
         id: f._id,
         name: f.originalName,
         size: f.size,
-        type: f.mimeType
-      }))
+        type: f.mimeType,
+        category: f.aiAnalysis?.category || '',
+        summary: f.aiAnalysis?.summary || '',
+        folderId: f.folder || null,
+        folderPath: folderPath
+      });
+    }
+
+    res.json({
+      success: true,
+      files: resultFiles
     });
   },
 
@@ -684,6 +744,83 @@ const fileController = {
       console.error('moveBatchFiles error:', error);
       res.status(500).json({ success: false, message: '批量移动失败' });
     }
+  },
+
+  /**
+   * 批量 AI 分析文件
+   * 选中文件或当前目录下所有未分析图片
+   */
+  analyzeFiles: async (req, res) => {
+    try {
+      const userId = req.userId;
+      const { fileIds, folder } = req.body;
+
+      const query = { owner: userId, isDeleted: false };
+      if (fileIds && fileIds.length > 0) {
+        query._id = { $in: fileIds };
+      } else if (folder !== undefined) {
+        query.folder = folder || null;
+      }
+
+      const user = await User.findById(userId);
+      const quotaOk = await checkAiQuota(user);
+      if (!quotaOk) {
+        return res.status(429).json({ success: false, message: '本月 AI 分析配额已用完，请下月再试' });
+      }
+
+      const files = await File.find(query).lean();
+      const imageExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp'];
+      const targets = files.filter(f =>
+        imageExtensions.includes(f.extension.toLowerCase()) &&
+        (!f.aiAnalysis || !f.aiAnalysis.analyzed)
+      );
+
+      if (targets.length === 0) {
+        return res.json({ success: true, analyzed: 0, message: '没有需要分析的文件' });
+      }
+
+      res.json({ success: true, analyzing: targets.length, message: `开始分析 ${targets.length} 个文件` });
+
+      // 异步分析（不阻塞响应）
+      const aiService = require('../services/aiService');
+      const storageService = require('../services/storageService');
+      let analyzed = 0;
+      for (const file of targets) {
+        try {
+          const filePath = storageService.resolvePath(file.storage.path);
+          const analysis = await aiService.analyzeImage(filePath);
+          if (analysis && analysis.labels.length > 0) {
+            const fileDoc = await File.findById(file._id);
+            fileDoc.aiAnalysis = {
+              analyzed: true, analyzedAt: new Date(),
+              labels: analysis.labels, category: analysis.category,
+              confidence: analysis.confidence, summary: analysis.summary || '',
+              objects: analysis.objects || [], scene: analysis.scene || '',
+              text: analysis.text || '',
+              model: process.env.AI_MODEL || 'gpt-4o',
+              promptTokens: analysis.promptTokens || 0,
+              completionTokens: analysis.completionTokens || 0,
+              totalTokens: analysis.totalTokens || 0
+            };
+            await fileDoc.save();
+
+            // 自动归类
+            if (process.env.AI_AUTO_ORGANIZE !== 'false') {
+              await autoOrganizeFile(fileDoc, analysis, userId, storageService);
+            }
+            analyzed++;
+          }
+        } catch (e) {
+          console.warn('[AI] Batch analyze failed for', file._id, ':', e.message);
+        }
+      }
+      console.log('[AI] Batch complete:', analyzed, '/', targets.length);
+    } catch (error) {
+      console.error('analyzeFiles error:', error);
+      if (!res.headersSent) {
+        res.status(500).json({ success: false, message: '分析失败' });
+      }
+    }
   }
 };
 
@@ -694,6 +831,55 @@ const fileController = {
  * @param {string} userId - 用户ID
  * @returns {Array} - 面包屑数组 [{id, name}, ...]
  */
+/**
+ * AI 配额检查 — 普通用户受 AI_MONTHLY_LIMIT 限制，管理员无限制
+ * @returns {boolean} 是否允许分析
+ */
+async function checkAiQuota(user) {
+  if (user.role === 'admin') return true;
+  const limit = parseInt(process.env.AI_MONTHLY_LIMIT) || 20;
+  if (limit === 0) return true;
+
+  const monthStart = new Date();
+  monthStart.setDate(1);
+  monthStart.setHours(0, 0, 0, 0);
+
+  const count = await File.countDocuments({
+    owner: user._id,
+    'aiAnalysis.analyzed': true,
+    'aiAnalysis.analyzedAt': { $gte: monthStart }
+  });
+
+  return count < limit;
+}
+
+/**
+ * 获取用户 AI 配额信息（用于前端展示）
+ */
+async function getAiQuota(user) {
+  const limit = parseInt(process.env.AI_MONTHLY_LIMIT) || 20;
+  if (user.role === 'admin' || limit === 0) {
+    return { limited: false, used: 0, limit: 0, percent: 0 };
+  }
+
+  const monthStart = new Date();
+  monthStart.setDate(1);
+  monthStart.setHours(0, 0, 0, 0);
+
+  const count = await File.countDocuments({
+    owner: user._id,
+    'aiAnalysis.analyzed': true,
+    'aiAnalysis.analyzedAt': { $gte: monthStart }
+  });
+
+  return {
+    limited: true,
+    used: count,
+    limit,
+    percent: Math.round((count / limit) * 100)
+  };
+}
+
 async function buildBreadcrumb(folderId, userId) {
   const breadcrumb = [];
   let currentId = folderId;
@@ -708,6 +894,74 @@ async function buildBreadcrumb(folderId, userId) {
   }
 
   return breadcrumb;
+}
+
+/**
+ * 自动归类：根据 AI 分析结果创建文件夹并移动文件
+ * 如果文件名是纯字母/数字，用 AI 描述替换
+ */
+async function autoOrganizeFile(fileDoc, analysis, userId, storageService) {
+  try {
+    // 1. 确定目标文件夹路径
+    const category = analysis.category && analysis.category !== '其他' ? analysis.category : null;
+    const subLabel = analysis.labels[0] && analysis.labels[0] !== category ? analysis.labels[0] : null;
+
+    let targetFolderId = null;
+
+    if (category) {
+      // 查找或创建一级分类文件夹
+      let catFolder = await Folder.findOne({
+        owner: userId, parent: null, name: category, isDeleted: false
+      });
+      if (!catFolder) {
+        catFolder = new Folder({
+          name: category, owner: userId, parent: null,
+          path: '/' + category, depth: 1, order: 0
+        });
+        await catFolder.save();
+      }
+
+      targetFolderId = catFolder._id;
+
+      // 如果有子标签，创建二级文件夹
+      if (subLabel && analysis.confidence >= 70) {
+        let subFolder = await Folder.findOne({
+          owner: userId, parent: catFolder._id, name: subLabel, isDeleted: false
+        });
+        if (!subFolder) {
+          subFolder = new Folder({
+            name: subLabel, owner: userId, parent: catFolder._id,
+            path: '/' + category + '/' + subLabel, depth: 2, order: 0
+          });
+          await subFolder.save();
+        }
+        targetFolderId = subFolder._id;
+      }
+    }
+
+    // 2. 重命名（纯字母/数字文件名）
+    if (analysis.summary && /^[a-zA-Z0-9._-]+$/.test(fileDoc.originalName)) {
+      const ext = fileDoc.extension;
+      const baseName = analysis.summary.length > 30
+        ? analysis.summary.slice(0, 30)
+        : analysis.summary;
+      // 清理文件名中的特殊字符
+      const cleanName = baseName.replace(/[<>:"/\\|?*]/g, '').trim();
+      if (cleanName) {
+        fileDoc.originalName = cleanName + ext;
+      }
+    }
+
+    // 3. 移动文件到目标文件夹
+    if (targetFolderId) {
+      fileDoc.folder = targetFolderId;
+    }
+
+    await fileDoc.save();
+    console.log('[AI] Organized:', fileDoc.originalName, '→', analysis.category + (subLabel ? '/' + subLabel : ''));
+  } catch (e) {
+    console.warn('[AI] Auto-organize failed:', e.message);
+  }
 }
 
 module.exports = fileController;

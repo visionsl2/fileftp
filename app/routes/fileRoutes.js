@@ -21,6 +21,7 @@ router.get('/:id/stream', fileController.streamVideo);
 router.patch('/:id/rename', fileController.renameFile);
 router.patch('/:id/move', fileController.moveFile);
 router.patch('/move-batch', fileController.moveBatchFiles);
+router.post('/analyze', fileController.analyzeFiles);
 
 router.delete('/:id', fileController.deleteFile);
 

@@ -955,3 +955,108 @@ body {
 .file-thumb-container[data-type="video"] {
   position: relative;
 }
+
+/* AI 分析标签 */
+.file-ai-info {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  margin-top: 2px;
+}
+
+.ai-category-badge {
+  display: inline-block;
+  padding: 1px 6px;
+  background: linear-gradient(135deg, #667eea, #764ba2);
+  color: white;
+  border-radius: 8px;
+  font-size: 10px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.ai-summary {
+  font-size: 11px;
+  color: #888;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 120px;
+}
+
+/* 列表视图下的 AI 信息 */
+.file-list[data-view="list"] .file-ai-info {
+  margin-top: 0;
+  margin-left: 8px;
+}
+
+.file-list[data-view="list"] .ai-summary {
+  max-width: 200px;
+}
+
+/* 上传结果面板 */
+.upload-results {
+  margin-top: 8px;
+  border-top: 1px solid #e0e0e0;
+  padding-top: 8px;
+}
+
+.upload-result-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 0;
+  font-size: 13px;
+}
+
+.upload-filename {
+  color: #333;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  margin-right: 8px;
+}
+
+.upload-goto {
+  color: #667eea;
+  text-decoration: none;
+  white-space: nowrap;
+  font-size: 12px;
+}
+
+.upload-goto:hover {
+  text-decoration: underline;
+}
+
+.ai-tag {
+  display: inline-block;
+  padding: 0 4px;
+  background: linear-gradient(135deg, #667eea, #764ba2);
+  color: white;
+  border-radius: 4px;
+  font-size: 10px;
+}
+
+/* AI 配额显示 */
+.ai-quota {
+  font-size: 13px;
+  opacity: 0.9;
+  padding: 2px 8px;
+  border-radius: 10px;
+  background: rgba(255,255,255,0.15);
+}
+
+.ai-quota.admin {
+  background: rgba(255,215,0,0.3);
+}
+
+.ai-quota.warn {
+  background: rgba(255,100,100,0.35);
+  animation: quota-blink 1s infinite;
+}
+
+@keyframes quota-blink {
+  50% { background: rgba(255,60,60,0.5); }
+}

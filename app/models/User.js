@@ -58,6 +58,12 @@ const userSchema = new mongoose.Schema({
     type: Number,
     default: 0
   },
+  // 用户角色: user=普通用户, admin=管理员
+  role: {
+    type: String,
+    enum: ['user', 'admin'],
+    default: 'user'
+  },
   // 账号状态
   isActive: {
     type: Boolean,

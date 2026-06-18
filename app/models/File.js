@@ -86,6 +86,22 @@ const fileSchema = new mongoose.Schema({
     width: Number,        // 缩略图宽度
     height: Number       // 缩略图高度
   },
+  // AI 分析结果（图片/视频自动分类）
+  aiAnalysis: {
+    analyzed: { type: Boolean, default: false },
+    analyzedAt: Date,
+    labels: [String],              // 物体标签
+    category: String,              // 分类: 人物/风景/食物/动物/交通/建筑/文档/截图/其他
+    confidence: Number,            // 置信度 0-100
+    summary: String,               // AI 生成的一句话描述
+    objects: [String],             // 识别到的物体列表
+    scene: String,                 // 室内/室外
+    text: String,                  // OCR 文字
+    model: String,                 // 使用的模型
+    promptTokens: Number,          // 输入 token 数
+    completionTokens: Number,      // 输出 token 数
+    totalTokens: Number            // 总 token 数
+  },
   // 软删除标志 - true表示已删除
   isDeleted: {
     type: Boolean,

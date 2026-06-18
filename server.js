@@ -1,5 +1,5 @@
 /**
- * FileFTP 服务器入口文件
+ * 赛博网盘 服务器入口文件
  *
  * 功能说明：
  * - Express应用配置
@@ -42,6 +42,7 @@ const fileRoutes = require('./app/routes/fileRoutes');
 const folderRoutes = require('./app/routes/folderRoutes');
 const apiRoutes = require('./app/routes/apiRoutes');
 const shareRoutes = require('./app/routes/shareRoutes');
+const adminRoutes = require('./app/routes/adminRoutes');
 
 const app = express();
 
@@ -97,6 +98,9 @@ app.use('/api/v1', apiRoutes);
 
 // 分享路由：无需登录即可访问
 app.use('/share', shareRoutes);
+
+// 管理后台：仅管理员可访问
+app.use('/admin', adminRoutes);
 
 // ==================== 根路由 ====================
 

@@ -160,6 +160,11 @@ class FileBrowser {
         this.showShareModal();
       }
     });
+
+    // 智能整理按钮
+    document.getElementById('aiAnalyzeBtn')?.addEventListener('click', () => {
+      this.aiAnalyzeFiles();
+    });
   }
 
   updateBatchActions() {
@@ -714,6 +719,40 @@ class FileBrowser {
     this.applyViewMode();
   }
 
+  async aiAnalyzeFiles() {
+    const btn = document.getElementById('aiAnalyzeBtn');
+    btn.disabled = true;
+    btn.textContent = '分析中...';
+    try {
+      const body = {};
+      if (this.selectedFiles.size > 0) {
+        body.fileIds = Array.from(this.selectedFiles);
+      } else {
+        body.folder = this.currentFolder || null;
+      }
+      const res = await fetch('/files/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+      const data = await res.json();
+      if (data.success) {
+        alert(data.message || '分析完成');
+        location.reload();
+      } else if (res.status === 429) {
+        alert('本月 AI 配额已用完，请下月再试或联系管理员');
+      } else {
+        alert(data.message || '分析失败');
+      }
+    } catch (e) {
+      console.error('AI analyze error:', e);
+      alert('分析请求失败');
+    } finally {
+      btn.disabled = false;
+      btn.innerHTML = '<svg class="icon" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/></svg>智能整理';
+    }
+  }
+
   navigateToFolder(folderId) {
     const url = `/files?folder=${folderId}`;
     window.location.href = url;
@@ -846,15 +885,27 @@ class FileBrowser {
       try {
         const data = JSON.parse(xhr.responseText);
         if (data.success) {
-          if (statusText) {
-            statusText.textContent = '上传成功';
-            statusText.className = 'upload-item-status success';
-          }
           if (progressBar) progressBar.style.width = '100%';
 
-          setTimeout(() => {
-            location.reload();
-          }, 500);
+          // 显示每个文件的归类结果
+          let html = '<div class="upload-item-status success">上传成功</div>';
+          if (data.files && data.files.length > 0) {
+            html += '<div class="upload-results">';
+            data.files.forEach(f => {
+              const dest = f.category
+                ? '<span class="ai-tag">' + f.category + '</span> ' + (f.folderPath || '根目录')
+                : '根目录';
+              const link = f.folderId
+                ? '<a href="/files?folder=' + f.folderId + '" class="upload-goto" title="跳转到文件夹">📂 ' + dest + '</a>'
+                : '<span class="upload-goto">📂 ' + dest + '</span>';
+              html += '<div class="upload-result-item">' +
+                '<span class="upload-filename">' + f.name + '</span>' +
+                link +
+                '</div>';
+            });
+            html += '</div>';
+          }
+          uploadItem.innerHTML = html;
         } else {
           if (statusText) {
             statusText.textContent = data.message || '上传失败';
