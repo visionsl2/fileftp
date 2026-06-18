@@ -300,7 +300,67 @@ Content-Length: 1024000</code></pre>
         </div>
       </div>
 
-      <h2>4. 错误码</h2>
+      <h2>4. 视频流播放</h2>
+      <div class="endpoint">
+        <div class="endpoint-title">
+          <span class="method get">GET</span>
+          <span class="path">/files/:id/stream</span>
+        </div>
+        <p>流式播放视频文件，支持 HTTP Range（拖拽进度条）</p>
+        <h4>请求示例</h4>
+        <pre><code>curl -H "Cookie: token=xxx" http://localhost:3000/files/60f1a2b3/stream \
+  -H "Range: bytes=0-1048575"</code></pre>
+      </div>
+
+      <h2>5. AI 批量分析</h2>
+      <div class="endpoint">
+        <div class="endpoint-title">
+          <span class="method post">POST</span>
+          <span class="path">/files/analyze</span>
+        </div>
+        <p>对指定文件或目录下的未分析图片/视频进行 AI 识别分类。</p>
+        <h4>请求参数</h4>
+        <table>
+          <tr><th>参数</th><th>类型</th><th>说明</th></tr>
+          <tr><td class="param">fileIds</td><td>string[]</td><td>可选，指定文件ID列表</td></tr>
+          <tr><td class="param">folder</td><td>string</td><td>可选，分析指定文件夹下所有未分析文件</td></tr>
+        </table>
+        <h4>成功响应 (200)</h4>
+        <pre><code>{
+  "success": true,
+  "analyzing": 5,
+  "message": "开始分析 5 个文件"
+}</code></pre>
+        <h4>配额超限 (429)</h4>
+        <pre><code>{
+  "success": false,
+  "message": "本月 AI 分析配额已用完，请下月再试"
+}</code></pre>
+        <h4>分析完成后，文件数据新增字段</h4>
+        <pre><code>{
+  "aiAnalysis": {
+    "analyzed": true,
+    "category": "风景",
+    "labels": ["海滩", "日落", "海浪"],
+    "summary": "海边日落时分",
+    "model": "gpt-4o",
+    "promptTokens": 420,
+    "completionTokens": 65,
+    "totalTokens": 485
+  }
+}</code></pre>
+      </div>
+
+      <h2>6. 管理后台</h2>
+      <div class="endpoint">
+        <div class="endpoint-title">
+          <span class="method get">GET</span>
+          <span class="path">/admin</span>
+        </div>
+        <p>管理员仪表盘，查看全局 AI Token 用量和用户统计。仅 admin 角色可访问。</p>
+      </div>
+
+      <h2>7. 错误码</h2>
 
       <table>
         <tr><th>错误码</th><th>HTTP状态</th><th>说明</th></tr>
@@ -312,6 +372,7 @@ Content-Length: 1024000</code></pre>
         <tr><td class="param">FILE_NOT_FOUND</td><td>404</td><td>文件不存在</td></tr>
         <tr><td class="param">NO_FILE</td><td>400</td><td>没有上传文件</td></tr>
         <tr><td class="param">STORAGE_EXCEEDED</td><td>400</td><td>存储空间不足</td></tr>
+        <tr><td class="param">AI_QUOTA_EXCEEDED</td><td>429</td><td>AI 分析配额用完</td></tr>
         <tr><td class="param">UPLOAD_ERROR</td><td>500</td><td>上传失败</td></tr>
         <tr><td class="param">SERVER_ERROR</td><td>500</td><td>服务器内部错误</td></tr>
       </table>

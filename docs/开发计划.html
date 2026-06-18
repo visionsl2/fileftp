@@ -199,8 +199,9 @@
       <h3>7. 图片缩略图预览</h3>
       <span class="status status-done">已完成</span>
       <ul>
-        <li>图片文件显示真实缩略图</li>
-        <li>点击缩略图弹出预览模态框</li>
+        <li>图片文件显示真实缩略图（sharp）</li>
+        <li>视频文件显示 ffmpeg 截取帧缩略图</li>
+        <li>点击缩略图弹出预览模态框（图片）/ 视频播放器</li>
         <li>模态框支持下载功能</li>
         <li>支持 jpg/png/gif/webp 等格式</li>
       </ul>
@@ -236,6 +237,46 @@ storageUsed: Number
 isActive: Boolean
 lastLogin: Date</code></pre>
 
+      <h2>V2.0 新增功能</h2>
+
+      <h3>9. 视频在线播放</h3>
+      <span class="status status-done">已完成</span>
+      <ul>
+        <li>HTML5 视频播放器，支持进度条拖拽（HTTP Range 206）</li>
+        <li>ffmpeg 自动截取首帧生成视频缩略图</li>
+      </ul>
+
+      <h3>10. AI 智能分析</h3>
+      <span class="status status-done">已完成</span>
+      <ul>
+        <li>双引擎：本地 MobileNet（TensorFlow.js）+ 云端多模态大模型</li>
+        <li>图片/视频内容识别 → 标签、分类、描述</li>
+        <li>自动按分类创建文件夹并归档</li>
+        <li>纯字母/数字文件名自动替换为 AI 描述</li>
+        <li>Token 用量统计，用户级配额控制</li>
+        <li>管理后台全局监控 AI 使用情况</li>
+      </ul>
+
+      <h3>11. 待开发</h3>
+      <span class="status status-pending">规划中</span>
+      <ul>
+        <li>PDF/文档类 AI 分析</li>
+        <li>文件全文搜索</li>
+        <li>批量下载打包</li>
+        <li>用户自助注册开关</li>
+      </ul>
+
+      <h2>数据模型</h2>
+
+      <h3>User (用户)</h3>
+      <pre><code>username: String
+email: String
+password: String (bcrypt加密)
+role: String (user/admin)
+storageQuota: Number
+storageUsed: Number
+apiToken: String</code></pre>
+
       <h3>File (文件)</h3>
       <pre><code>filename: String (存储文件名)
 originalName: String (原始文件名)
@@ -247,7 +288,12 @@ folder: ObjectId (所属文件夹)
 owner: ObjectId (所有者用户)
 upload.complete: Boolean
 stats.downloads: Number
-isDeleted: Boolean (软删除)</code></pre>
+isDeleted: Boolean (软删除)
+aiAnalysis.analyzed: Boolean
+aiAnalysis.category: String (人物/风景/食物...)
+aiAnalysis.labels: [String]
+aiAnalysis.summary: String
+aiAnalysis.totalTokens: Number</code></pre>
 
       <h3>Folder (文件夹)</h3>
       <pre><code>name: String

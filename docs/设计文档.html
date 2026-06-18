@@ -61,6 +61,12 @@
           <li><strong>安全过滤</strong> - 黑名单机制，禁止上传危险文件类型</li>
           <li><strong>开放API</strong> - RESTful API，支持第三方系统集成</li>
           <li><strong>可配置存储</strong> - 支持任意磁盘路径存储文件</li>
+          <li><strong>视频在线播放</strong> - 流媒体播放（HTTP Range），支持拖拽进度条</li>
+          <li><strong>视频缩略图</strong> - ffmpeg 自动截取视频帧作为封面</li>
+          <li><strong>AI 智能分析</strong> - 支持本地 MobileNet + 云端多模态大模型（GPT-4V/Claude/通义千问等）</li>
+          <li><strong>自动归类</strong> - AI 根据图片/视频内容自动分类归档到层级文件夹</li>
+          <li><strong>智能重命名</strong> - 纯字母/数字文件名自动替换为 AI 描述</li>
+          <li><strong>Token 管理</strong> - AI 调用用量统计，用户级配额控制，管理后台全局监控</li>
         </ul>
       </div>
 
@@ -76,6 +82,9 @@
         <tr><td>认证方式</td><td>JWT + Session</td><td>令牌认证与会话管理</td></tr>
         <tr><td>文件上传</td><td>Formidable</td><td>处理 multipart/form-data</td></tr>
         <tr><td>密码加密</td><td>bcryptjs</td><td>单向哈希加密</td></tr>
+        <tr><td>图片处理</td><td>sharp</td><td>缩略图生成、EXIF 提取</td></tr>
+        <tr><td>视频处理</td><td>ffmpeg</td><td>视频帧提取、缩略图</td></tr>
+        <tr><td>AI 引擎</td><td>TensorFlow.js / OpenAI API</td><td>本地识别 + 云端多模态大模型</td></tr>
       </table>
 
       <h3>2.2 系统架构图</h3>
@@ -243,6 +252,87 @@ Folder.find({ owner: userId, ... })</code></pre>
         <tr><td>DELETE</td><td>/api/v1/files/:id</td><td>删除文件</td><td>X-API-Token</td></tr>
       </table>
 
+      <h3>5.3 AI 分析接口</h3>
+      <table>
+        <tr><th>方法</th><th>路径</th><th>说明</th><th>认证</th></tr>
+        <tr><td>GET</td><td>/files/:id/stream</td><td>视频流播放</td><td>Token</td></tr>
+        <tr><td>POST</td><td>/files/analyze</td><td>批量AI分析</td><td>Token</td></tr>
+        <tr><td>GET</td><td>/admin</td><td>管理后台</td><td>Token (admin)</td></tr>
+      </table>
+
+      <h2>5A. AI 智能分析系统</h2>
+
+      <h3>5A.1 架构设计</h3>
+      <div class="diagram">
+        <pre style="background: #f8f9fa; color: #333; text-align: left;">
+┌──────────────────────────────────────────────────┐
+│                   上传文件                         │
+│          图片(jpg/png) │ 视频(mp4/mov)             │
+└──────────┬────────────────┬──────────────────────┘
+           │                │
+           ▼                ▼
+   ┌───────────┐    ┌───────────────┐
+   │ AI 分析器  │    │ ffmpeg 取帧    │
+   └─────┬─────┘    └───────┬───────┘
+         │                  │ 截图帧
+         ▼                  ▼
+   ┌─────────────────────────────────┐
+   │         AI 引擎选择              │
+   │  ┌──────────┐  ┌──────────────┐ │
+   │  │ MobileNet │  │ 多模态大模型  │ │
+   │  │ (本地CPU) │  │ (GPT-4V等)   │ │
+   │  └──────────┘  └──────────────┘ │
+   └─────────────┬───────────────────┘
+                 │ 分类+标签+描述
+                 ▼
+   ┌─────────────────────────────────┐
+   │           自动归档               │
+   │  人物/照片 风景/海边 交通/汽车... │
+   └─────────────┬───────────────────┘
+                 │
+                 ▼
+   ┌─────────────────────────────────┐
+   │         Token 统计               │
+   │  用户配额检查 + 管理员全局监控    │
+   └─────────────────────────────────┘
+        </pre>
+      </div>
+
+      <h3>5A.2 双引擎模式</h3>
+      <table>
+        <tr><th>引擎</th><th>技术</th><th>准确度</th><th>硬件要求</th><th>网络</th></tr>
+        <tr><td>本地 MobileNet</td><td>TensorFlow.js + CPU</td><td>中等（1000类）</td><td>CPU + 200MB内存</td><td>离线</td></tr>
+        <tr><td>云端大模型</td><td>OpenAI 兼容 API</td><td>高（自然语言理解）</td><td>无要求</td><td>需要</td></tr>
+      </table>
+
+      <h3>5A.3 分类体系</h3>
+      <table>
+        <tr><th>大类</th><th>示例标签</th></tr>
+        <tr><td>人物</td><td>person, face, portrait, selfie</td></tr>
+        <tr><td>动物</td><td>cat, dog, bird, fish, horse</td></tr>
+        <tr><td>风景</td><td>mountain, beach, sunset, sky, flower</td></tr>
+        <tr><td>食物</td><td>pizza, sushi, cake, coffee, fruit</td></tr>
+        <tr><td>交通</td><td>car, bus, train, airplane, boat</td></tr>
+        <tr><td>建筑</td><td>building, church, tower, bridge, city</td></tr>
+        <tr><td>电子</td><td>computer, phone, camera, screen</td></tr>
+        <tr><td>文档</td><td>book, paper, poster, menu</td></tr>
+        <tr><td>截图</td><td>web site, comic, screenshot</td></tr>
+      </table>
+
+      <h3>5A.4 Token 配额体系</h3>
+      <table>
+        <tr><th>配置项</th><th>默认值</th><th>说明</th></tr>
+        <tr><td>AI_MONTHLY_LIMIT</td><td>20</td><td>普通用户每月分析文件数上限</td></tr>
+        <tr><td>AI_AUTO_CLASSIFY</td><td>true</td><td>上传后自动分析</td></tr>
+        <tr><td>AI_AUTO_ORGANIZE</td><td>true</td><td>自动创建文件夹并归类</td></tr>
+        <tr><td>AI_PROVIDER</td><td>openai</td><td>大模型提供商（兼容 OpenAI API）</td></tr>
+      </table>
+      <p><strong>角色权限：</strong></p>
+      <ul>
+        <li><strong>admin</strong> - 无 AI 使用限制，可访问管理后台查看全局 Token 统计</li>
+        <li><strong>user</strong> - 受 AI_MONTHLY_LIMIT 限制，每月 1 号自动重置</li>
+      </ul>
+
       <h2>6. 项目结构</h2>
       <div class="file-structure">
         <pre><code>fileftp/
@@ -258,15 +348,21 @@ Folder.find({ owner: userId, ... })</code></pre>
         │   │   ├── authController.js    # 认证
         │   │   ├── fileController.js   # 文件操作
         │   │   ├── folderController.js # 文件夹操作
-        │   │   └── apiController.js    # 开放API
+        │   │   ├── apiController.js    # 开放API
+        │   │   ├── adminController.js  # 管理后台
+        │   │   └── shareController.js  # 分享
         │   ├── models/                 # 数据模型
         │   │   ├── User.js
         │   │   ├── File.js
         │   │   └── Folder.js
+        │   ├── services/               # 服务层
+        │   │   ├── storageService.js   # 存储服务
+        │   │   └── aiService.js        # AI 分析引擎
         │   ├── routes/                 # 路由定义
         │   │   ├── authRoutes.js
         │   │   ├── fileRoutes.js
         │   │   ├── folderRoutes.js
+        │   │   ├── adminRoutes.js      # 管理后台路由
         │   │   └── apiRoutes.js
         │   ├── middlewares/            # 中间件
         │   │   ├── authMiddleware.js   # 认证中间件
@@ -278,6 +374,8 @@ Folder.find({ owner: userId, ... })</code></pre>
         │   ├── utils/                  # 工具函数
         │   │   └── helpers.js          # 视图辅助函数
         │   ├── views/                  # EJS模板
+        │   │   ├── admin/
+        │   │   │   └── dashboard.ejs     # 管理后台
         │   │   ├── auth/
         │   │   │   ├── login.ejs
         │   │   │   └── register.ejs

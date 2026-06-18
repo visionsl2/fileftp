@@ -47,7 +47,20 @@
           <tr><td>Node.js</td><td>16.x 或更高</td><td>JavaScript 运行时</td></tr>
           <tr><td>MongoDB</td><td>4.4 或更高</td><td>数据库服务</td></tr>
           <tr><td>npm</td><td>8.x 或更高</td><td>包管理器（Node.js自带）</td></tr>
+          <tr><td>ffmpeg（可选）</td><td>4.x 或更高</td><td>视频缩略图生成、视频 AI 分析</td></tr>
         </table>
+
+        <h3>可选的 AI 大模型配置</h3>
+        <table>
+          <tr><th>配置项</th><th>说明</th><th>示例值</th></tr>
+          <tr><td>AI_PROVIDER</td><td>AI 提供商</td><td>openai</td></tr>
+          <tr><td>AI_BASE_URL</td><td>API 地址</td><td>https://api.openai.com/v1</td></tr>
+          <tr><td>AI_API_KEY</td><td>API 密钥</td><td>sk-xxxx</td></tr>
+          <tr><td>AI_MODEL</td><td>模型名称</td><td>gpt-4o / claude-3-5-sonnet / minimax-M3</td></tr>
+          <tr><td>AI_MONTHLY_LIMIT</td><td>普通用户月限额（文件数）</td><td>20</td></tr>
+          <tr><td>FFMPEG_PATH</td><td>ffmpeg 可执行文件路径</td><td>/usr/bin/ffmpeg</td></tr>
+        </table>
+        <p>不配置大模型时，系统自动使用本地 TensorFlow.js MobileNet 模型（离线可用，准确度较低）。</p>
       </div>
 
       <div class="tip">
