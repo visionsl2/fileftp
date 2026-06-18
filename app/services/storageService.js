@@ -363,6 +363,54 @@ class StorageService {
     }
     return path.join(uploadConfig.uploadDir, storedPath);
   }
+
+  /**
+   * 清理孤儿文件（磁盘有但数据库无记录的文件）
+   * 在服务启动时调用，清理上次上传失败留下的残留文件
+   */
+  async cleanOrphanFiles() {
+    const File = require('../models/File');
+    try {
+      // 获取数据库中所有文件路径
+      const dbFiles = await File.find({ isDeleted: false }, 'storage.path thumb.path').lean();
+      const dbPaths = new Set();
+      for (const f of dbFiles) {
+        if (f.storage?.path) dbPaths.add(this.resolvePath(f.storage.path));
+        if (f.thumb?.path) dbPaths.add(this.resolvePath(f.thumb.path));
+      }
+
+      // 扫描 uploads 目录，跳过 thumbs/temp/chunks 子目录
+      const uploadDir = uploadConfig.uploadDir;
+      let cleaned = 0;
+      const scanDir = async (dir, depth = 0) => {
+        if (depth > 4) return;
+        try {
+          const entries = await fsp.readdir(dir, { withFileTypes: true });
+          for (const e of entries) {
+            const full = path.join(dir, e.name);
+            if (e.isDirectory()) {
+              if (!['thumbs', 'temp', 'chunks'].includes(e.name)) {
+                await scanDir(full, depth + 1);
+              }
+            } else {
+              if (!dbPaths.has(full.replace(/\\/g, '/'))) {
+                try {
+                  await fsp.unlink(full);
+                  cleaned++;
+                } catch {}
+              }
+            }
+          }
+        } catch {}
+      };
+      await scanDir(uploadDir);
+      if (cleaned > 0) {
+        console.log('[Storage] Cleaned', cleaned, 'orphan file(s)');
+      }
+    } catch (e) {
+      console.warn('[Storage] Orphan cleanup skipped:', e.message);
+    }
+  }
 }
 
 module.exports = new StorageService();

@@ -109,6 +109,9 @@ const fileController = {
     // 解析上传请求
     let collectedFiles = [];
     let parsed;
+    const uploadStart = Date.now();
+    let totalBytesReceived = 0;
+    const inProgressPaths = new Set(); // 正在写入的文件路径，失败时清理
 
     try {
       // 手动收集文件（formidable v2 多文件有 bug，用事件收集）
@@ -123,33 +126,81 @@ const fileController = {
           maxTotalFileSize: uploadConfig.maxFileSize * uploadConfig.maxFilesPerRequest
         });
 
+        // 跟踪上传进度
+        req.on('data', (chunk) => {
+          totalBytesReceived += chunk.length;
+        });
+
+        // 诊断：记录连接断开原因
+        req.on('close', () => {
+          if (!collectedFiles.length) {
+            console.warn('[Upload] Connection closed before any file received, bytes:', totalBytesReceived);
+          }
+        });
+        req.on('aborted', () => {
+          console.warn('[Upload] Request aborted by client at', ((Date.now() - uploadStart) / 1000).toFixed(0) + 's,',
+            'bytes:', totalBytesReceived, 'files received:', collectedFiles.length);
+        });
+
+        // 文件开始写入时记录路径（用于失败清理）
+        form.on('fileBegin', (formName, file) => {
+          inProgressPaths.add(file.filepath);
+        });
+
         form.on('file', (formName, file) => {
+          inProgressPaths.delete(file.filepath); // 文件接收完毕，从清理列表移除
           const result = fileFilter.checkExtension(file.originalFilename || file.newFilename || '');
           if (!result.allowed) {
             file._blocked = true;
           }
           collectedFiles.push(file);
+          console.log('[Upload] File received:', file.originalFilename || file.newFilename,
+            'size:', (file.size / 1024 / 1024).toFixed(1) + 'MB');
         });
 
-        // 捕获请求中断（如手机端浏览器取消上传）
+        form.on('field', (name, value) => {
+          if (name === 'folder') console.log('[Upload] Target folder:', value || 'root');
+        });
+
+        // 进度日志（每 30 秒）
+        const progressTimer = setInterval(() => {
+          const elapsed = ((Date.now() - uploadStart) / 1000).toFixed(0);
+          console.log('[Upload] Progress:', elapsed + 's,', (totalBytesReceived / 1024 / 1024).toFixed(1) + 'MB received,',
+            collectedFiles.length, 'files parsed');
+        }, 30000);
+
         form.on('error', (err) => {
+          clearInterval(progressTimer);
           reject(err);
         });
 
         form.parse(req, (err, fields, files) => {
+          clearInterval(progressTimer);
           if (err) {
             reject(err);
           } else {
+            const elapsed = ((Date.now() - uploadStart) / 1000).toFixed(1);
+            console.log('[Upload] Parsed successfully in', elapsed + 's,',
+              collectedFiles.length, 'files,', (totalBytesReceived / 1024 / 1024).toFixed(1) + 'MB');
             resolve({ fields, files });
           }
         });
       });
     } catch (parseErr) {
-      console.error('[Upload] Parse error:', parseErr.message);
+      const elapsed = ((Date.now() - uploadStart) / 1000).toFixed(1);
+      console.error('[Upload] Parse error after', elapsed + 's,',
+        (totalBytesReceived / 1024 / 1024).toFixed(1) + 'MB:', parseErr.message);
 
-      // 清理已上传的临时文件
-      for (const f of collectedFiles) {
-        try { await storageService.deleteFile(f.filepath); } catch {}
+      // 清理已上传的文件 + 正在写入的残留文件
+      const cleanupPaths = [
+        ...collectedFiles.map(f => f.filepath),
+        ...inProgressPaths
+      ];
+      for (const fp of cleanupPaths) {
+        try { await storageService.deleteFile(fp); } catch {}
+      }
+      if (cleanupPaths.length > 0) {
+        console.log('[Upload] Cleaned up', cleanupPaths.length, 'file(s) after failure');
       }
 
       // 客户端取消请求时不返回错误（连接已断开）

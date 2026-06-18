@@ -34,7 +34,7 @@
     <div class="header">
       <h1>赛博网盘 部署手册</h1>
       <p>从零开始在服务器上部署 赛博网盘 系统</p>
-      <div style="margin-top:12px"><span style="background:rgba(255,255,255,0.2);padding:4px 12px;border-radius:12px;font-size:12px">V2.0.0</span></div>
+      <div style="margin-top:12px"><span style="background:rgba(255,255,255,0.2);padding:4px 12px;border-radius:12px;font-size:12px">V2.0.1</span></div>
     </div>
 
     <div class="content">
@@ -220,7 +220,17 @@ server {
     listen 80;
     server_name your-domain.com;
 
-    client_max_body_size 100M;  # 最大上传100MB
+    client_max_body_size 0;  # 不限制上传大小（或用具体值如 10G）
+
+    # 上传大文件需要长超时（视频等可能耗时数分钟）
+    client_body_timeout 600s;
+    proxy_read_timeout 600s;
+    proxy_send_timeout 600s;
+    proxy_connect_timeout 600s;
+
+    # 禁用缓冲，直接流式传输到 Node.js
+    proxy_request_buffering off;
+    proxy_buffering off;
 
     location / {
         proxy_pass http://127.0.0.1:3000;

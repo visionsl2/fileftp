@@ -34,6 +34,7 @@ const session = require('express-session');
 const cors = require('cors');
 const cookieParser = require('cookie-parser');
 
+const mongoose = require('mongoose');
 const connectDB = require('./app/config/database');
 
 // 导入路由
@@ -47,7 +48,31 @@ const adminRoutes = require('./app/routes/adminRoutes');
 const app = express();
 
 // 连接MongoDB数据库
-connectDB();
+const dbConn = connectDB();
+
+// 启动时自动升级老用户的 1GB 默认配额
+dbConn.then(async () => {
+  if (mongoose.connection.readyState === 1) {
+    const User = require('./app/models/User');
+    const oldDefault = 1024 * 1024 * 1024; // 旧默认 1GB
+    const newDefault = parseInt(process.env.DEFAULT_STORAGE_QUOTA) || 100 * 1024 * 1024 * 1024;
+    const result = await User.updateMany(
+      { storageQuota: oldDefault },
+      { $set: { storageQuota: newDefault } }
+    );
+    if (result.modifiedCount > 0) {
+      console.log(`[Startup] Upgraded ${result.modifiedCount} user(s) quota: 1GB → ${(newDefault/1024/1024/1024).toFixed(0)}GB`);
+    }
+  }
+}).catch(() => {});
+
+// 启动时清理上次上传失败留下的孤儿文件
+setTimeout(async () => {
+  if (mongoose.connection.readyState === 1) {
+    const storageService = require('./app/services/storageService');
+    await storageService.cleanOrphanFiles().catch(() => {});
+  }
+}, 3000);
 
 // ==================== 中间件配置 ====================
 
@@ -132,7 +157,21 @@ app.use((err, req, res, next) => {
 
 // ==================== 启动服务器 ====================
 
+// ==================== 上传超时配置 ====================
+
+// 文件上传路由需要较长超时（大视频可能耗时数分钟）
+app.use('/files/upload', (req, res, next) => {
+  req.setTimeout(120 * 60 * 1000);  // 2小时上传超时
+  res.setTimeout(120 * 60 * 1000);
+  next();
+});
+
+// ==================== 启动服务器 ====================
+
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
+server.timeout = 120 * 60 * 1000;  // 全局 10 分钟超时
+server.headersTimeout = 120 * 60 * 1000 + 1000;
+server.keepAliveTimeout = 120 * 60 * 1000 + 1000;

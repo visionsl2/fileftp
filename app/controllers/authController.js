@@ -70,7 +70,8 @@ const authController = {
       }
 
       // 创建新用户（密码在User模型的pre-save钩子中自动加密）
-      const user = new User({ username, email, password });
+      const defaultQuota = parseInt(process.env.DEFAULT_STORAGE_QUOTA) || 100 * 1024 * 1024 * 1024;
+      const user = new User({ username, email, password, storageQuota: defaultQuota });
       await user.save();
 
       // 注册成功，跳转到登录页

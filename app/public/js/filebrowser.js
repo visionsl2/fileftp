@@ -848,92 +848,92 @@ class FileBrowser {
     if (uploadPanel) uploadPanel.classList.add('show');
     if (uploadList) uploadList.innerHTML = '';
 
-    const formData = new FormData();
     const urlParams = new URLSearchParams(window.location.search);
     const folderId = urlParams.get('folder') || '';
-    formData.append('folder', folderId);
+
+    // 逐个文件顺序上传（避免大视频打包进单个 FormData 导致内存爆炸）
+    let successCount = 0, failCount = 0;
+    const results = [];
+
+    const container = document.createElement('div');
+    container.className = 'upload-batch';
+    container.innerHTML = '<div class="upload-batch-title">上传 ' + files.length + ' 个文件</div>';
+    uploadList?.appendChild(container);
 
     for (let i = 0; i < files.length; i++) {
-      formData.append('files', files[i]);
-    }
+      const file = files[i];
+      const fileItem = document.createElement('div');
+      fileItem.className = 'upload-file-item';
+      fileItem.innerHTML =
+        '<span class="upload-file-name">' + file.name + '</span>' +
+        '<span class="upload-file-size">' + formatSize(file.size) + '</span>' +
+        '<span class="upload-file-status">等待...</span>' +
+        '<div class="upload-progress" style="height:3px"><div class="upload-progress-bar" style="width:0%"></div></div>';
+      container.appendChild(fileItem);
 
-    const uploadItem = document.createElement('div');
-    uploadItem.className = 'upload-item';
-    uploadItem.innerHTML = `
-      <div class="upload-item-name">正在上传 ${files.length} 个文件...</div>
-      <div class="upload-progress">
-        <div class="upload-progress-bar" style="width: 0%"></div>
-      </div>
-      <div class="upload-item-status">准备中...</div>
-    `;
-    uploadList?.appendChild(uploadItem);
+      const bar = fileItem.querySelector('.upload-progress-bar');
+      const status = fileItem.querySelector('.upload-file-status');
 
-    const progressBar = uploadItem.querySelector('.upload-progress-bar');
-    const statusText = uploadItem.querySelector('.upload-item-status');
-
-    const xhr = new XMLHttpRequest();
-
-    xhr.upload.addEventListener('progress', (e) => {
-      if (e.lengthComputable) {
-        const percent = Math.round((e.loaded / e.total) * 100);
-        if (progressBar) progressBar.style.width = percent + '%';
-        if (statusText) statusText.textContent = `${percent}% (${formatSize(e.loaded)} / ${formatSize(e.total)})`;
-      }
-    });
-
-    xhr.addEventListener('load', () => {
       try {
-        const data = JSON.parse(xhr.responseText);
-        if (data.success) {
-          if (progressBar) progressBar.style.width = '100%';
-
-          // 显示每个文件的归类结果
-          let html = '<div class="upload-item-status success">上传成功</div>';
-          if (data.files && data.files.length > 0) {
-            html += '<div class="upload-results">';
-            data.files.forEach(f => {
-              const dest = f.category
-                ? '<span class="ai-tag">' + f.category + '</span> ' + (f.folderPath || '根目录')
-                : '根目录';
-              const link = f.folderId
-                ? '<a href="/files?folder=' + f.folderId + '" class="upload-goto" title="跳转到文件夹">📂 ' + dest + '</a>'
-                : '<span class="upload-goto">📂 ' + dest + '</span>';
-              html += '<div class="upload-result-item">' +
-                '<span class="upload-filename">' + f.name + '</span>' +
-                link +
-                '</div>';
-            });
-            html += '</div>';
-          }
-          uploadItem.innerHTML = html;
+        const data = await this.uploadSingleFile(file, folderId, (pct) => {
+          if (bar) bar.style.width = pct + '%';
+          if (status) status.textContent = pct + '%';
+        });
+        if (data && data.success) {
+          successCount++;
+          if (status) { status.textContent = '✓'; status.className = 'upload-file-status success'; }
+          if (data.files) results.push(...data.files);
         } else {
-          if (statusText) {
-            statusText.textContent = data.message || '上传失败';
-            statusText.className = 'upload-item-status error';
-          }
+          failCount++;
+          if (status) { status.textContent = '✗ ' + ((data && data.message) || '失败'); status.className = 'upload-file-status error'; }
         }
-      } catch {
-        if (statusText) {
-          statusText.textContent = '上传失败';
-          statusText.className = 'upload-item-status error';
-        }
+      } catch (e) {
+        failCount++;
+        if (status) { status.textContent = '✗ 网络错误'; status.className = 'upload-file-status error'; }
       }
-    });
-
-    xhr.addEventListener('error', () => {
-      if (statusText) {
-        statusText.textContent = '网络错误';
-        statusText.className = 'upload-item-status error';
-      }
-    });
-
-    const token = getCookie('token');
-    xhr.open('POST', '/files/upload');
-    if (token) {
-      xhr.setRequestHeader('Authorization', `Bearer ${token}`);
     }
-    xhr.send(formData);
+
+    const summary = document.createElement('div');
+    summary.className = 'upload-batch-summary';
+    let summaryHTML = '完成: ' + successCount + ' 成功' + (failCount > 0 ? ', ' + failCount + ' 失败' : '');
+    if (results.length > 0) {
+      summaryHTML += '<div class="upload-results">';
+      results.forEach(f => {
+        const dest = f.category ? '<span class="ai-tag">' + f.category + '</span> ' + (f.folderPath || '根目录') : '根目录';
+        const link = f.folderId ? ' <a href="/files?folder=' + f.folderId + '" class="upload-goto">📂 ' + dest + '</a>' : ' <span class="upload-goto">📂 ' + dest + '</span>';
+        summaryHTML += '<div class="upload-result-item"><span class="upload-filename">' + f.name + '</span>' + link + '</div>';
+      });
+      summaryHTML += '</div>';
+    }
+    summary.innerHTML = summaryHTML;
+    container.appendChild(summary);
   }
+
+  uploadSingleFile(file, folderId, onProgress) {
+    return new Promise((resolve) => {
+      const fd = new FormData();
+      fd.append('folder', folderId);
+      fd.append('files', file);
+
+      const xhr = new XMLHttpRequest();
+      xhr.timeout = 120 * 60 * 1000;
+      xhr.upload.addEventListener('progress', (e) => {
+        if (e.lengthComputable && onProgress) onProgress(Math.round(e.loaded / e.total * 100));
+      });
+      xhr.addEventListener('load', () => {
+        try { resolve(JSON.parse(xhr.responseText)); } catch { resolve({ success: false, message: '解析失败' }); }
+      });
+      xhr.addEventListener('error', () => resolve({ success: false, message: '网络错误' }));
+      xhr.addEventListener('timeout', () => resolve({ success: false, message: '上传超时' }));
+      xhr.addEventListener('abort', () => resolve({ success: false, message: '已取消' }));
+
+      xhr.open('POST', '/files/upload');
+      const token = getCookie('token');
+      if (token) xhr.setRequestHeader('Authorization', 'Bearer ' + token);
+      xhr.send(fd);
+    });
+  }
+
 }
 
 function formatSize(bytes) {
