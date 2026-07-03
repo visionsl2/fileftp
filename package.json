@@ -1,13 +1,14 @@
 {
   "name": "fileftp",
-  "version": "2.0.1",
+  "version": "2.0.3",
   "description": "文件上传下载浏览系统",
   "main": "server.js",
   "scripts": {
     "build": "babel app -d dist/app --copy-files && babel server.js -o dist/server.js && cp .env dist/.env",
     "start": "node dist/server.js",
     "dev": "nodemon server.js",
-    "pkg": "pkg . --targets node22-win-x64 --output dist/fileftp-win"
+    "pkg:win": "pkg . --targets node22-win-x64 --output dist/fileftp-win",
+    "pkg:linux": "pkg . --targets node22-linux-x64 --output dist/fileftp-linux"
   },
   "pkg": {
     "assets": [

@@ -13,6 +13,7 @@ router.use(apiLimiter);
 router.post('/files/upload', upload.single('file'), apiController.uploadFile);
 
 router.get('/files', apiController.listFiles);
+router.post('/files/check-duplicates', apiController.checkDuplicates);
 router.get('/files/:id/info', apiController.getFileInfo);
 router.get('/files/:id/download', apiController.downloadFile);
 router.delete('/files/:id', apiController.deleteFile);

@@ -41,6 +41,12 @@ const fileSchema = new mongoose.Schema({
     type: Number,
     required: true
   },
+  // SHA-256 哈希（用于去重）
+  sha256: {
+    type: String,
+    default: null,
+    index: true           // 加速查重查询
+  },
   // 存储信息
   storage: {
     path: String           // 物理文件路径（相对路径）
@@ -115,6 +121,9 @@ const fileSchema = new mongoose.Schema({
 
 // 复合索引 - 加速用户文件列表查询
 fileSchema.index({ owner: 1, folder: 1 });
+
+// 联合索引 - 加速按用户查 SHA-256 去重
+fileSchema.index({ owner: 1, sha256: 1 });
 
 // 全文索引 - 支持文件名搜索
 fileSchema.index({ originalName: 'text' });

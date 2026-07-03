@@ -16,6 +16,7 @@ const User = require('../models/User');
 const File = require('../models/File');
 const Folder = require('../models/Folder');
 const storageService = require('../services/storageService');
+const aiQueue = require('../services/aiQueue');
 const path = require('path');
 
 const apiController = {
@@ -131,12 +132,21 @@ const apiController = {
 
       const storage = await storageService.saveFile(file.path, user._id, folder || null);
 
+      // 计算 SHA-256（流式，大文件不卡）
+      let sha256 = null;
+      try {
+        sha256 = await storageService.getFileHash(storage.path);
+      } catch (hashErr) {
+        console.warn('[API Upload] SHA-256 compute failed:', hashErr.message);
+      }
+
       const fileDoc = new File({
         filename: storage.relativePath,
         originalName: file.originalname,
         mimeType: file.mimetype,
         extension: path.extname(file.originalname).toLowerCase(),
         size: file.size,
+        sha256,
         storage: { path: storage.relativePath },
         folder: folder || null,
         owner: user._id
@@ -144,10 +154,32 @@ const apiController = {
 
       await fileDoc.save();
 
+      // AI 自动分析（与主系统一致：标记 + 后台异步）
+      const _pendingAi = [];
+      const aiAutoClassify = process.env.AI_AUTO_CLASSIFY === 'true';
+      const ext = path.extname(file.originalname).toLowerCase();
+      const isMedia = storageService.isImage(ext) || storageService.isVideo(ext);
+      if (aiAutoClassify && isMedia) {
+        const quotaOk = await aiQueue.checkAiQuota(user);
+        if (quotaOk) {
+          _pendingAi.push({
+            fileId: fileDoc._id.toString(),
+            storagePath: storage.path,
+            isVideo: storageService.isVideo(ext),
+            userId: user._id
+          });
+        }
+      }
+
       // 更新用户存储使用量
       await User.findByIdAndUpdate(user._id, {
         $inc: { storageUsed: file.size }
       });
+
+      // 调度后台 AI 分析
+      if (_pendingAi.length > 0) {
+        aiQueue.scheduleAiAnalysis(_pendingAi);
+      }
 
       res.json({
         success: true,
@@ -157,6 +189,7 @@ const apiController = {
           size: fileDoc.size,
           type: fileDoc.mimeType,
           extension: fileDoc.extension,
+          sha256: fileDoc.sha256,
           createdAt: fileDoc.createdAt
         }
       });
@@ -208,6 +241,7 @@ const apiController = {
           size: f.size,
           type: f.mimeType,
           extension: f.extension,
+          sha256: f.sha256,
           folder: f.folder,
           createdAt: f.createdAt,
           updatedAt: f.updatedAt
@@ -272,6 +306,77 @@ const apiController = {
         success: false,
         error: 'SERVER_ERROR',
         message: '获取文件信息失败'
+      });
+    }
+  },
+
+  /**
+   * 批量查重接口 — 给客户端检测哪些 SHA-256 已存在
+   * POST /api/v1/files/check-duplicates
+   * Body: { hashes: ["sha1", "sha2", ...] }
+   * Response: { duplicates: {hash: {id, name}}, new: ["hash2"] }
+   */
+  checkDuplicates: async (req, res) => {
+    try {
+      const user = req.apiUser;
+      const { hashes } = req.body || {};
+
+      if (!Array.isArray(hashes) || hashes.length === 0) {
+        return res.status(400).json({
+          success: false,
+          error: 'INVALID_HASHES',
+          message: '请提供 hashes 数组'
+        });
+      }
+
+      // 单次最多 500 个，超出分批由客户端处理
+      const MAX_BATCH = 500;
+      const inputHashes = hashes.slice(0, MAX_BATCH);
+
+      // 简单格式校验：SHA-256 是 64 位十六进制
+      const validHashes = inputHashes.filter(h =>
+        typeof h === 'string' && /^[a-fA-F0-9]{64}$/.test(h)
+      );
+
+      if (validHashes.length === 0) {
+        return res.json({ success: true, duplicates: {}, new: inputHashes });
+      }
+
+      // 一次查询：按 owner + sha256 命中
+      const existing = await File.find({
+        owner: user._id,
+        sha256: { $in: validHashes },
+        isDeleted: false
+      }, 'sha256 originalName').lean();
+
+      const duplicates = {};
+      const foundHashes = new Set();
+      existing.forEach(f => {
+        if (f.sha256) {
+          duplicates[f.sha256] = { id: f._id, name: f.originalName };
+          foundHashes.add(f.sha256);
+        }
+      });
+
+      // new: 输入中未命中的（含格式不合法）
+      const newHashes = inputHashes.filter(h => !foundHashes.has(h));
+
+      res.json({
+        success: true,
+        duplicates,
+        new: newHashes,
+        stats: {
+          input: inputHashes.length,
+          duplicates: Object.keys(duplicates).length,
+          new: newHashes.length
+        }
+      });
+    } catch (error) {
+      console.error('API check duplicates error:', error);
+      res.status(500).json({
+        success: false,
+        error: 'SERVER_ERROR',
+        message: '查重失败'
       });
     }
   },

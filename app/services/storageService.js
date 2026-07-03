@@ -189,13 +189,13 @@ class StorageService {
   }
 
   /**
-   * 计算文件哈希（MD5）
+   * 计算文件 SHA-256 哈希（流式，不占内存）
    * @param {string} filePath - 文件路径
-   * @returns {Promise<string>} 哈希值
+   * @returns {Promise<string>} 64位十六进制字符串
    */
   async getFileHash(filePath) {
     return new Promise((resolve, reject) => {
-      const hash = crypto.createHash('md5');
+      const hash = crypto.createHash('sha256');
       const stream = fs.createReadStream(filePath);
 
       stream.on('data', data => hash.update(data));
@@ -357,16 +357,24 @@ class StorageService {
    */
   resolvePath(storedPath) {
     if (!storedPath) return storedPath;
-    // 已是绝对路径（Unix 以 / 开头，Windows 以盘符如 C:/ 开头）
+    // 修复反斜杠
+    storedPath = storedPath.replace(/\\/g, '/');
+    // 已是绝对路径：Unix 以 / 开头，Windows 以盘符如 C:/ 开头
     if (path.isAbsolute(storedPath) || /^[A-Za-z]:[/\\]/.test(storedPath)) {
+      // 旧数据兼容：跨平台迁移时，去掉旧绝对路径的盘符和旧根目录，只保留相对部分
+      // Z:/file_uploads/userId/folderId/file.mp4 → userId/folderId/file.mp4
+      const match = storedPath.match(/^[A-Za-z]:\/[^/]+\/(.+)$/);
+      if (match) {
+        return path.join(uploadConfig.uploadDir, match[1]);
+      }
       return storedPath;
     }
     return path.join(uploadConfig.uploadDir, storedPath);
   }
 
   /**
-   * 清理孤儿文件（磁盘有但数据库无记录的文件）
-   * 在服务启动时调用，清理上次上传失败留下的残留文件
+   * 移动孤儿文件（磁盘有但数据库无记录的文件）到 _orphan 文件夹
+   * 不物理删除，管理员可手动审核后决定是否删除
    */
   async cleanOrphanFiles() {
     const File = require('../models/File');
@@ -379,24 +387,29 @@ class StorageService {
         if (f.thumb?.path) dbPaths.add(this.resolvePath(f.thumb.path));
       }
 
-      // 扫描 uploads 目录，跳过 thumbs/temp/chunks 子目录
+      // 扫描 uploads 目录，跳过 thumbs/temp/chunks/_orphan 子目录
       const uploadDir = uploadConfig.uploadDir;
-      let cleaned = 0;
+      const orphanDir = path.join(uploadDir, '_orphan');
+      let moved = 0;
       const scanDir = async (dir, depth = 0) => {
         if (depth > 4) return;
         try {
           const entries = await fsp.readdir(dir, { withFileTypes: true });
           for (const e of entries) {
             const full = path.join(dir, e.name);
+            const normalized = full.replace(/\\/g, '/');
             if (e.isDirectory()) {
-              if (!['thumbs', 'temp', 'chunks'].includes(e.name)) {
+              if (!['thumbs', 'temp', 'chunks', '_orphan'].includes(e.name)) {
                 await scanDir(full, depth + 1);
               }
             } else {
-              if (!dbPaths.has(full.replace(/\\/g, '/'))) {
+              if (!dbPaths.has(normalized)) {
                 try {
-                  await fsp.unlink(full);
-                  cleaned++;
+                  await this.ensureDir(orphanDir);
+                  const destName = Date.now() + '_' + e.name;
+                  const dest = path.join(orphanDir, destName);
+                  await fsp.rename(full, dest);
+                  moved++;
                 } catch {}
               }
             }
@@ -404,8 +417,8 @@ class StorageService {
         } catch {}
       };
       await scanDir(uploadDir);
-      if (cleaned > 0) {
-        console.log('[Storage] Cleaned', cleaned, 'orphan file(s)');
+      if (moved > 0) {
+        console.log('[Storage] Moved', moved, 'unrecognized file(s) to _orphan/ (not deleted)');
       }
     } catch (e) {
       console.warn('[Storage] Orphan cleanup skipped:', e.message);

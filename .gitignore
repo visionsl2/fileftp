@@ -11,3 +11,11 @@ cookies.txt
 coverage/
 dist/
 build/
+
+
+# Deployment scripts (use SSH directly)
+deploy2.js
+deploy_upload.js
+
+# Test files
+tmp-test/

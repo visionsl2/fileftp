@@ -203,6 +203,7 @@ async function analyzeWithLLM(filePath, customPrompt) {
 
   try {
     const res = await fetch(baseUrl + '/chat/completions', {
+        signal: AbortSignal.timeout(30000), // 30s timeout
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -210,7 +211,7 @@ async function analyzeWithLLM(filePath, customPrompt) {
       },
       body: JSON.stringify({
         model,
-        max_tokens: 500,
+        max_tokens: 200000,
         temperature: 0.3,
         messages: [{
           role: 'user',

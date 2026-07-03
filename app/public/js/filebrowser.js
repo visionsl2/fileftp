@@ -26,7 +26,67 @@ class FileBrowser {
     this.initImagePreview();
     this.initVideoPlayer();
     this.initModals();
+    this.bindSearch();
+    this.bindRecentFiles();
+    this.initSidebar();
     this.applyViewMode();
+    this.pollAiStatus();
+    this.initInfiniteScroll();
+  }
+
+  // 无限滚动加载更多
+  initInfiniteScroll() {
+    const sentinel = document.getElementById('loadMoreSentinel');
+    if (!sentinel) return;
+
+    this._loadingMore = false;
+    const observer = new IntersectionObserver((entries) => {
+      if (entries[0].isIntersecting && !this._loadingMore) {
+        this.loadMoreFiles();
+      }
+    }, { rootMargin: '200px' });
+    observer.observe(sentinel);
+  }
+
+  async loadMoreFiles() {
+    const list = document.getElementById('fileList');
+    if (!list) return;
+    const nextPage = parseInt(list.dataset.page || '1') + 1;
+    const totalPages = parseInt(list.dataset.totalPages || '1');
+    if (nextPage > totalPages) return;
+
+    this._loadingMore = true;
+    const sentinel = document.getElementById('loadMoreSentinel');
+    if (sentinel) sentinel.textContent = '加载中...';
+
+    try {
+      const folder = list.dataset.folder || '';
+      const url = '/files/more?page=' + nextPage + (folder ? '&folder=' + folder : '');
+      const res = await fetch(url);
+      const data = await res.json();
+      if (data.success && data.html) {
+        // 创建临时容器解析 HTML
+        const tmp = document.createElement('div');
+        tmp.innerHTML = data.html;
+        while (tmp.firstChild) {
+          list.appendChild(tmp.firstChild);
+        }
+        list.dataset.page = data.nextPage;
+        if (!data.hasMore) {
+          // 没有更多了，移除 sentinel 和 observer
+          if (sentinel) sentinel.remove();
+        } else {
+          if (sentinel) sentinel.textContent = '加载更多...';
+        }
+        // 重新绑定事件到新元素
+        this.rebindFileActions();
+      }
+    } catch (e) {
+      console.error('Load more error:', e);
+      if (sentinel) sentinel.textContent = '加载失败，点击重试';
+    } finally {
+      this._loadingMore = false;
+    }
   }
 
   bindUploadEvents() {
@@ -702,6 +762,155 @@ class FileBrowser {
     }
   }
 
+  // --- 搜索 ---
+  bindSearch() {
+    const input = document.getElementById('searchInput');
+    const clear = document.getElementById('searchClear');
+    if (!input) return;
+    let timer;
+    input.addEventListener('input', () => {
+      clearTimeout(timer);
+      const val = input.value.trim();
+      clear.style.display = val ? 'block' : 'none';
+      timer = setTimeout(() => this.doSearch(val), 300);
+    });
+    clear.addEventListener('click', () => {
+      input.value = '';
+      clear.style.display = 'none';
+      this.doSearch('');
+    });
+  }
+
+  async doSearch(keyword) {
+    const fileList = document.getElementById('fileList');
+    if (!fileList) return;
+    if (!keyword) {
+      if (this._originalList) { fileList.innerHTML = this._originalList; this._originalList = null; this.rebindFileActions(); }
+      return;
+    }
+    if (!this._originalList) this._originalList = fileList.innerHTML;
+    try {
+      const res = await fetch('/files/search?q=' + encodeURIComponent(keyword));
+      const data = await res.json();
+      if (!data.files || data.files.length === 0) {
+        fileList.innerHTML = '<div class="empty-state"><p>未找到匹配文件</p></div>';
+        return;
+      }
+      let html = '';
+      data.files.forEach(f => {
+        const thumbHtml = (f.isImage || (f.isVideo && f.thumb))
+          ? '<div class="file-thumb-container" data-type="' + (f.isVideo ? 'video' : 'image') + '" data-full-url="/files/' + f.id + '/' + (f.isVideo ? 'stream' : 'preview') + '"><img src="/files/' + f.id + '/thumb" class="file-thumb" loading="lazy">' + (f.isVideo ? '<div class="video-play-overlay"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg></div>' : '') + '</div>'
+          : '<div class="file-icon"><svg viewBox="0 0 24 24"><path d="M6 2c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V8l-6-6H6z"/></svg></div>';
+        const folderLink = f.folderPath
+          ? ' <a href="/files?folder=' + f.folderId + '" class="search-result-folder">📁 ' + f.folderPath + '</a>'
+          : '';
+        const aiTag = f.aiCategory
+          ? '<span class="ai-category-badge">' + f.aiCategory + '</span> '
+          : '';
+        html += '<div class="file-item file-item-row" data-type="file" data-id="' + f.id + '" draggable="true">' +
+          '<input type="checkbox" class="file-checkbox" data-id="' + f.id + '">' + thumbHtml +
+          '<div class="file-name">' + f.name + '</div>' +
+          '<div class="file-ai-info">' + aiTag + folderLink + '</div>' +
+          '<div class="file-size">' + formatSize(f.size) + '</div>' +
+          '<div class="file-actions"><a href="/files/' + f.id + '/download" class="action-btn download"><svg viewBox="0 0 24 24"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg></a></div></div>';
+      });
+      fileList.innerHTML = html;
+      this.rebindFileActions();
+    } catch (e) { console.error('Search error:', e); }
+  }
+
+  rebindFileActions() {
+    this.initImagePreview();
+    this.initVideoPlayer();
+    this.bindSelectionEvents();
+    this.bindDragMove();
+  }
+
+  // --- 最近上传点击 ---
+  bindRecentFiles() {
+    document.querySelectorAll('.recent-item').forEach(item => {
+      item.addEventListener('click', () => {
+        const type = item.dataset.type, url = item.dataset.url;
+        const fileId = item.dataset.id, folder = item.dataset.folder;
+        const name = item.querySelector('.recent-name')?.textContent || '';
+        if (type === 'image') {
+          const m = document.getElementById('imagePreviewModal');
+          const i = document.getElementById('previewImg');
+          const n = document.getElementById('previewFileName');
+          const d = document.getElementById('previewDownloadBtn');
+          if (m && i) { i.src = url; if (n) n.textContent = name; if (d) d.href = '/files/' + fileId + '/download'; m.classList.add('show'); }
+        } else if (type === 'video') {
+          const m = document.getElementById('videoPlayerModal');
+          const p = document.getElementById('videoPlayer');
+          const n = document.getElementById('videoFileName');
+          const d = document.getElementById('videoDownloadBtn');
+          if (m && p) { p.src = url; if (n) n.textContent = name; if (d) d.href = '/files/' + fileId + '/download'; m.classList.add('show'); p.play().catch(() => {}); }
+        } else if (folder) {
+          window.location.href = '/files?folder=' + folder;
+        }
+      });
+    });
+  }
+
+  // --- 侧边栏 ---
+  initSidebar() {
+    this.loadSidebarTree();
+    // 折叠按钮
+    document.getElementById('sidebarToggle')?.addEventListener('click', () => {
+      document.getElementById('sidebar')?.classList.toggle('collapsed');
+    });
+  }
+
+  async loadSidebarTree() {
+    try {
+      const res = await fetch('/folders', { headers: { 'Accept': 'application/json' } });
+      const folders = await res.json();
+      const tree = document.getElementById('sidebarTree');
+      if (!tree || !folders || !folders.data) return;
+
+      // 清空并重建
+      tree.innerHTML = '';
+      const root = document.createElement('div');
+      root.className = 'folder-item root';
+      root.dataset.id = '';
+      root.innerHTML = '<span class="folder-icon">📂</span><span class="folder-name">全部文件</span>';
+      root.addEventListener('click', () => this.navigateToFolder(''));
+      if (!this.currentFolder) root.classList.add('selected');
+      tree.appendChild(root);
+
+      // 构建树
+      const folderMap = {};
+      const rootFolders = [];
+      folders.data.forEach(f => {
+        folderMap[f._id] = { ...f, children: [] };
+      });
+      folders.data.forEach(f => {
+        if (f.parent && folderMap[f.parent]) {
+          folderMap[f.parent].children.push(folderMap[f._id]);
+        } else {
+          rootFolders.push(folderMap[f._id]);
+        }
+      });
+
+      const renderNode = (node, depth) => {
+        const item = document.createElement('div');
+        item.className = 'folder-item child';
+        item.dataset.id = node._id;
+        item.style.paddingLeft = (14 + depth * 16) + 'px';
+        item.innerHTML = '<span class="folder-icon">📁</span><span class="folder-name">' + node.name + '</span>';
+        item.addEventListener('click', (e) => { e.stopPropagation(); this.navigateToFolder(node._id); });
+        if (node._id === this.currentFolder) item.classList.add('selected');
+        tree.appendChild(item);
+        if (node.children?.length > 0) {
+          node.children.forEach(c => renderNode(c, depth + 1));
+        }
+      };
+      rootFolders.forEach(n => renderNode(n, 1));
+    } catch (e) {
+      console.error('Sidebar tree error:', e);
+    }
+  }
+
   applyViewMode() {
     const fileList = document.getElementById('fileList');
     if (fileList) {
@@ -750,6 +959,43 @@ class FileBrowser {
     } finally {
       btn.disabled = false;
       btn.innerHTML = '<svg class="icon" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/></svg>智能整理';
+    }
+  }
+
+  // 轮询 AI 分析状态，更新 pending 文件卡片
+  async pollAiStatus() {
+    const pendingItems = document.querySelectorAll('.file-item-row[data-ai-pending="true"]');
+    if (pendingItems.length === 0) return;
+
+    const checkOne = async (item) => {
+      const fileId = item.dataset.id;
+      try {
+        const res = await fetch('/files/' + fileId + '/ai-status');
+        const data = await res.json();
+        if (data.status === 'done') {
+          item.dataset.aiPending = 'false';
+          const aiInfo = item.querySelector('.file-ai-info');
+          if (aiInfo && data.result) {
+            const badge = document.createElement('span');
+            badge.className = 'ai-category-badge';
+            badge.title = '置信度 ' + (data.result.confidence || 0) + '%';
+            badge.textContent = data.result.category || '';
+            const summary = document.createElement('span');
+            summary.className = 'ai-summary';
+            summary.textContent = data.result.summary || '';
+            aiInfo.innerHTML = '';
+            aiInfo.appendChild(badge);
+            if (data.result.summary) aiInfo.appendChild(summary);
+          }
+        }
+      } catch (e) { /* retry next poll */ }
+    };
+
+    await Promise.all([...pendingItems].map(checkOne));
+
+    const remaining = document.querySelectorAll('.file-item-row[data-ai-pending="true"]').length;
+    if (remaining > 0) {
+      setTimeout(() => this.pollAiStatus(), 3000);
     }
   }
 
@@ -852,7 +1098,7 @@ class FileBrowser {
     const folderId = urlParams.get('folder') || '';
 
     // 逐个文件顺序上传（避免大视频打包进单个 FormData 导致内存爆炸）
-    let successCount = 0, failCount = 0;
+    let successCount = 0, failCount = 0, _lastUploadData = null;
     const results = [];
 
     const container = document.createElement('div');
@@ -875,7 +1121,7 @@ class FileBrowser {
       const status = fileItem.querySelector('.upload-file-status');
 
       try {
-        const data = await this.uploadSingleFile(file, folderId, (pct) => {
+        const data = _lastUploadData = await this.uploadSingleFile(file, folderId, (pct) => {
           if (bar) bar.style.width = pct + '%';
           if (status) status.textContent = pct + '%';
         });
@@ -903,10 +1149,19 @@ class FileBrowser {
         const link = f.folderId ? ' <a href="/files?folder=' + f.folderId + '" class="upload-goto">📂 ' + dest + '</a>' : ' <span class="upload-goto">📂 ' + dest + '</span>';
         summaryHTML += '<div class="upload-result-item"><span class="upload-filename">' + f.name + '</span>' + link + '</div>';
       });
+      // 如果后台正在 AI 分析，在摘要底部显示提示 + 自动刷新
+      if (_lastUploadData && _lastUploadData.aiPending && _lastUploadData.aiPending.length > 0) {
+        summaryHTML += '<div class="upload-result-item" style="color:#f0ad4e;font-size:12px">🏷 文件已保存，AI正在后台分析中...3秒后自动刷新</div>';
+      }
       summaryHTML += '</div>';
     }
     summary.innerHTML = summaryHTML;
     container.appendChild(summary);
+
+    // 上传到当前目录时，自动刷新页面以显示新文件和 AI 徽标
+    if (successCount > 0 && _lastUploadData && _lastUploadData.aiPending && _lastUploadData.aiPending.length > 0) {
+      setTimeout(() => this.refresh(), 3000);
+    }
   }
 
   uploadSingleFile(file, folderId, onProgress) {
@@ -928,6 +1183,7 @@ class FileBrowser {
       xhr.addEventListener('abort', () => resolve({ success: false, message: '已取消' }));
 
       xhr.open('POST', '/files/upload');
+      xhr.setRequestHeader('Accept', 'application/json');
       const token = getCookie('token');
       if (token) xhr.setRequestHeader('Authorization', 'Bearer ' + token);
       xhr.send(fd);

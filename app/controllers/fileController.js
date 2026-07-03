@@ -17,6 +17,7 @@ const uploadConfig = require('../config/upload');
 const helpers = require('../utils/helpers');
 const path = require('path');
 const formidable = require('formidable').formidable;
+const aiQueue = require('../services/aiQueue');
 
 const fileController = {
   /**
@@ -32,8 +33,11 @@ const fileController = {
    */
   listFiles: async (req, res) => {
     try {
-      const { folder } = req.query;
+      const { folder, page = 1, limit = 50 } = req.query;
       const userId = req.userId || req.session?.userId;
+      const pageNum = Math.max(1, parseInt(page) || 1);
+      const limitNum = Math.min(200, Math.max(1, parseInt(limit) || 50));
+      const skip = (pageNum - 1) * limitNum;
 
       // 未登录则跳转登录页
       if (!userId) {
@@ -43,18 +47,27 @@ const fileController = {
       // 获取用户信息（用于显示存储配额）
       const user = await User.findById(userId);
 
-      // 查询文件和文件夹（按更新时间倒序）
-      const [files, folders] = await Promise.all([
+      // 查询文件和文件夹（按更新时间倒序，分页）
+      const [files, folders, recentFiles, totalFiles] = await Promise.all([
         File.find({
           owner: userId,
           folder: folder || null,
           isDeleted: false
-        }).sort({ updatedAt: -1 }),
+        }).sort({ updatedAt: -1 }).skip(skip).limit(limitNum).lean(),
         Folder.find({
           owner: userId,
           parent: folder || null,
           isDeleted: false
-        }).sort({ order: 1, name: 1 })
+        }).sort({ order: 1, name: 1 }),
+        File.find({
+          owner: userId,
+          isDeleted: false
+        }).sort({ createdAt: -1 }).limit(10).lean(),
+        File.countDocuments({
+          owner: userId,
+          folder: folder || null,
+          isDeleted: false
+        })
       ]);
 
       // 构建面包屑导航
@@ -70,10 +83,17 @@ const fileController = {
       res.render('files/browser', {
         files,
         folders,
+        recentFiles,
         currentFolder: folder || null,
         breadcrumb,
         user,
         aiQuota,
+        pagination: {
+          page: pageNum,
+          limit: limitNum,
+          total: totalFiles,
+          totalPages: Math.ceil(totalFiles / limitNum)
+        },
         title: '我的文件',
         formatFileSize: helpers.formatFileSize,
         formatDate: helpers.formatDate,
@@ -83,6 +103,57 @@ const fileController = {
     } catch (error) {
       console.error('listFiles error:', error);
       res.status(500).json({ success: false, message: '获取文件列表失败' });
+    }
+  },
+
+  /**
+   * 滚动加载更多文件（分页）
+   * GET /files/more?folder=xxx&page=2
+   */
+  loadMoreFiles: async (req, res) => {
+    try {
+      const { folder, page = 2, limit = 50 } = req.query;
+      const userId = req.userId || req.session?.userId;
+      if (!userId) {
+        return res.status(401).json({ success: false, message: '未认证' });
+      }
+      const pageNum = Math.max(1, parseInt(page) || 1);
+      const limitNum = Math.min(200, Math.max(1, parseInt(limit) || 50));
+      const skip = (pageNum - 1) * limitNum;
+
+      const [files, totalFiles] = await Promise.all([
+        File.find({
+          owner: userId,
+          folder: folder || null,
+          isDeleted: false
+        }).sort({ updatedAt: -1 }).skip(skip).limit(limitNum).lean(),
+        File.countDocuments({
+          owner: userId,
+          folder: folder || null,
+          isDeleted: false
+        })
+      ]);
+
+      // 渲染为 HTML 片段（前端直接 innerHTML 插入）
+      res.render('files/_file_item_partial', {
+        files,
+        formatFileSize: helpers.formatFileSize,
+        formatDate: helpers.formatDate,
+        getFileIcon: helpers.getFileIcon,
+        getFileIconClass: helpers.getFileIconClass
+      }, (err, html) => {
+        if (err) return res.status(500).json({ success: false, message: '渲染失败' });
+        res.json({
+          success: true,
+          html,
+          hasMore: skip + files.length < totalFiles,
+          nextPage: pageNum + 1,
+          total: totalFiles
+        });
+      });
+    } catch (error) {
+      console.error('loadMoreFiles error:', error);
+      res.status(500).json({ success: false, message: '加载更多失败' });
     }
   },
 
@@ -101,6 +172,7 @@ const fileController = {
    * 6. 更新用户已使用存储空间
    */
   uploadFiles: async (req, res) => {
+    try {
     const userId = req.userId || req.session?.userId;
     if (!userId) {
       return res.status(401).json({ success: false, message: '未认证' });
@@ -188,8 +260,22 @@ const fileController = {
       });
     } catch (parseErr) {
       const elapsed = ((Date.now() - uploadStart) / 1000).toFixed(1);
+      // ---- 详细诊断日志 ----
       console.error('[Upload] Parse error after', elapsed + 's,',
-        (totalBytesReceived / 1024 / 1024).toFixed(1) + 'MB:', parseErr.message);
+        (totalBytesReceived / 1024 / 1024).toFixed(1) + 'MB');
+      console.error('[Upload] Error name:', parseErr.name, 'code:', parseErr.code);
+      console.error('[Upload] Error httpCode:', parseErr.httpCode);
+      console.error('[Upload] Error message:', parseErr.message);
+      if (parseErr.stack) {
+        console.error('[Upload] Stack (first 3):', parseErr.stack.split(String.fromCharCode(10)).slice(0, 3).join(" | "));
+      }
+      try {
+        const fst = require('fs');
+        fst.accessSync(uploadConfig.uploadDir, fst.constants.W_OK);
+        console.error('[Upload] uploadDir OK, writable:', uploadConfig.uploadDir);
+      } catch (dirErr) {
+        console.error('[Upload] uploadDir NOT writable:', uploadConfig.uploadDir, '-', dirErr.message);
+      }
 
       // 清理已上传的文件 + 正在写入的残留文件
       const cleanupPaths = [
@@ -208,9 +294,12 @@ const fileController = {
         return; // Request aborted, no response needed
       }
 
+      const errMsg = parseErr.code
+        ? ('上传失败 [' + parseErr.code + ']: ' + (parseErr.message || ''))
+        : ('上传失败: ' + (parseErr.message || '未知错误'));
       return res.status(500).json({
         success: false,
-        message: '上传中断，请重试'
+        message: errMsg.slice(0, 200)
       });
     }
 
@@ -257,6 +346,7 @@ const fileController = {
     }
 
     const uploadedFiles = [];
+    const _pendingAiFiles = []; // 待后台 AI 分析的文件
 
     // 处理每个文件
     for (const file of validFiles) {
@@ -311,45 +401,21 @@ const fileController = {
           }
         }
 
-        // AI 自动分类（图片 + 视频）
-        const aiAutoClassify = process.env.AI_AUTO_CLASSIFY !== 'false';
+        // AI 自动分类 → 标记为待分析，后台异步处理
+        const aiAutoClassify = process.env.AI_AUTO_CLASSIFY === 'true';
         const aiMode = process.env.AI_CLASSIFY_MODE || 'auto';
-        const shouldAnalyze = aiAutoClassify && aiMode === 'auto' &&
-          (storageService.isImage(ext) || storageService.isVideo(ext));
-        // 配额检查
-        const aiQuotaOk = shouldAnalyze ? await checkAiQuota(user) : false;
+        const isMedia = storageService.isImage(ext) || storageService.isVideo(ext);
+        const shouldAnalyze = aiAutoClassify && aiMode === 'auto' && isMedia;
+        const aiQuotaOk = shouldAnalyze ? await aiQueue.checkAiQuota(user) : false;
         if (shouldAnalyze && aiQuotaOk) {
-          try {
-            const aiService = require('../services/aiService');
-            const analysis = storageService.isVideo(ext)
-              ? await aiService.analyzeVideo(storage.path)
-              : await aiService.analyzeImage(storage.path);
-            if (analysis && analysis.labels.length > 0) {
-              fileDoc.aiAnalysis = {
-                analyzed: true,
-                analyzedAt: new Date(),
-                labels: analysis.labels,
-                category: analysis.category,
-                confidence: analysis.confidence,
-                summary: analysis.summary || '',
-                objects: analysis.objects || [],
-                scene: analysis.scene || '',
-                text: analysis.text || '',
-                model: process.env.AI_MODEL || 'gpt-4o',
-                promptTokens: analysis.promptTokens || 0,
-                completionTokens: analysis.completionTokens || 0,
-                totalTokens: analysis.totalTokens || 0
-              };
-              await fileDoc.save();
-
-              // 自动归类 + 重命名
-              if (process.env.AI_AUTO_ORGANIZE !== 'false') {
-                await autoOrganizeFile(fileDoc, analysis, userId, storageService);
-              }
-            }
-          } catch (aiErr) {
-            console.warn('[AI] Analysis failed for', fileDoc._id, ':', aiErr.message);
-          }
+          fileDoc.aiAnalysis = { analyzed: false };
+          await fileDoc.save();
+          _pendingAiFiles.push({
+            fileId: fileDoc._id.toString(),
+            storagePath: storage.path,
+            isVideo: storageService.isVideo(ext),
+            userId: userId
+          });
         }
 
         uploadedFiles.push(fileDoc);
@@ -386,8 +452,20 @@ const fileController = {
 
     res.json({
       success: true,
-      files: resultFiles
+      files: resultFiles,
+      aiPending: _pendingAiFiles.length > 0 ? _pendingAiFiles.map(f => f.fileId) : undefined
     });
+
+    // 后台异步 AI 分析（不阻塞上传响应）
+    if (_pendingAiFiles.length > 0) {
+      aiQueue.scheduleAiAnalysis([..._pendingAiFiles]);
+    }
+  } catch (outerErr) {
+      console.error("[Upload] Unhandled error:", outerErr);
+      if (!res.headersSent) {
+        return res.status(500).json({ success: false, message: "服务器错误，请重试" });
+      }
+    }
   },
 
   /**
@@ -548,9 +626,15 @@ const fileController = {
         return res.status(400).json({ success: false, message: '不支持缩略图' });
       }
 
-      // 设置缓存头（1小时）
-      res.setHeader('Cache-Control', 'public, max-age=3600');
+      // 设置缓存头（7天 + ETag）
+      res.setHeader('Cache-Control', 'public, max-age=604800, immutable');
+      res.setHeader('ETag', '\"' + file._id.toString() + '\"');
       res.setHeader('Content-Type', 'image/jpeg');
+
+      // ETag 协商缓存：客户端 If-None-Match 匹配则返回 304（无 body）
+      if (req.headers['if-none-match'] === '\"' + file._id.toString() + '\"') {
+        return res.status(304).end();
+      }
 
       // 如果有缩略图，返回缩略图；否则返回原图
       let filePath = storageService.resolvePath(file.storage.path);
@@ -686,6 +770,63 @@ const fileController = {
   },
 
   /**
+   * 搜索文件（文件名、AI 标签、AI 分类、AI 摘要）
+   */
+  searchFiles: async (req, res) => {
+    try {
+      const userId = req.userId;
+      const { q } = req.query;
+
+      if (!q || !q.trim()) {
+        return res.json({ success: true, files: [] });
+      }
+
+      const keyword = q.trim();
+      const regex = new RegExp(keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+
+      const files = await File.find({
+        owner: userId,
+        isDeleted: false,
+        $or: [
+          { originalName: regex },
+          { 'aiAnalysis.labels': regex },
+          { 'aiAnalysis.category': regex },
+          { 'aiAnalysis.summary': regex },
+          { 'aiAnalysis.text': regex }
+        ]
+      }).sort({ updatedAt: -1 }).limit(50).lean();
+
+      // 填充文件夹路径
+      const folderIds = [...new Set(files.filter(f => f.folder).map(f => f.folder.toString()))];
+      const folders = await Folder.find({ _id: { $in: folderIds } }).lean();
+      const folderMap = {};
+      folders.forEach(f => { folderMap[f._id] = f.path || '/' + f.name; });
+
+      const result = files.map(f => ({
+        id: f._id,
+        name: f.originalName,
+        size: f.size,
+        extension: f.extension,
+        mimeType: f.mimeType,
+        folderId: f.folder,
+        folderPath: f.folder ? (folderMap[f.folder] || '') : '',
+        aiCategory: f.aiAnalysis?.category || '',
+        aiSummary: f.aiAnalysis?.summary || '',
+        thumb: !!f.thumb,
+        isImage: ['.jpg','.jpeg','.png','.gif','.bmp','.webp'].includes(f.extension.toLowerCase()),
+        isVideo: ['.mp4','.avi','.mov','.mkv','.webm'].includes(f.extension.toLowerCase()),
+        createdAt: f.createdAt,
+        updatedAt: f.updatedAt
+      }));
+
+      res.json({ success: true, files: result, keyword });
+    } catch (error) {
+      console.error('searchFiles error:', error);
+      res.status(500).json({ success: false, message: '搜索失败' });
+    }
+  },
+
+  /**
    * 重命名文件
    */
   renameFile: async (req, res) => {
@@ -798,7 +939,35 @@ const fileController = {
   },
 
   /**
-   * 批量 AI 分析文件
+   * 查询单个文件的 AI 分析状态（供前端轮询）
+   */
+  getAiStatus: async (req, res) => {
+    try {
+      const userId = req.userId;
+      const file = await require("../models/File").findOne({
+        _id: req.params.id,
+        owner: userId,
+        isDeleted: false
+      }).lean();
+      if (!file) {
+        return res.status(404).json({ success: false, message: "文件不存在" });
+      }
+      if (file.aiAnalysis?.analyzed) {
+        return res.json({ success: true, status: "done", result: {
+          labels: file.aiAnalysis.labels || [],
+          category: file.aiAnalysis.category || "",
+          confidence: file.aiAnalysis.confidence || 0,
+          summary: file.aiAnalysis.summary || ""
+        }});
+      }
+      return res.json({ success: true, status: "pending" });
+    } catch (error) {
+      console.error("getAiStatus error:", error);
+      res.status(500).json({ success: false, message: "查询失败" });
+    }
+  },
+
+  /**
    * 选中文件或当前目录下所有未分析图片
    */
   analyzeFiles: async (req, res) => {
@@ -814,7 +983,7 @@ const fileController = {
       }
 
       const user = await User.findById(userId);
-      const quotaOk = await checkAiQuota(user);
+      const quotaOk = await aiQueue.checkAiQuota(user);
       if (!quotaOk) {
         return res.status(429).json({ success: false, message: '本月 AI 分析配额已用完，请下月再试' });
       }
@@ -856,8 +1025,8 @@ const fileController = {
             await fileDoc.save();
 
             // 自动归类
-            if (process.env.AI_AUTO_ORGANIZE !== 'false') {
-              await autoOrganizeFile(fileDoc, analysis, userId, storageService);
+            if (process.env.AI_AUTO_ORGANIZE === 'true') {
+              await aiQueue.autoOrganizeFile(fileDoc, analysis, userId, storageService);
             }
             analyzed++;
           }
@@ -882,27 +1051,7 @@ const fileController = {
  * @param {string} userId - 用户ID
  * @returns {Array} - 面包屑数组 [{id, name}, ...]
  */
-/**
- * AI 配额检查 — 普通用户受 AI_MONTHLY_LIMIT 限制，管理员无限制
- * @returns {boolean} 是否允许分析
- */
-async function checkAiQuota(user) {
-  if (user.role === 'admin') return true;
-  const limit = parseInt(process.env.AI_MONTHLY_LIMIT) || 20;
-  if (limit === 0) return true;
 
-  const monthStart = new Date();
-  monthStart.setDate(1);
-  monthStart.setHours(0, 0, 0, 0);
-
-  const count = await File.countDocuments({
-    owner: user._id,
-    'aiAnalysis.analyzed': true,
-    'aiAnalysis.analyzedAt': { $gte: monthStart }
-  });
-
-  return count < limit;
-}
 
 /**
  * 获取用户 AI 配额信息（用于前端展示）
@@ -945,74 +1094,6 @@ async function buildBreadcrumb(folderId, userId) {
   }
 
   return breadcrumb;
-}
-
-/**
- * 自动归类：根据 AI 分析结果创建文件夹并移动文件
- * 如果文件名是纯字母/数字，用 AI 描述替换
- */
-async function autoOrganizeFile(fileDoc, analysis, userId, storageService) {
-  try {
-    // 1. 确定目标文件夹路径
-    const category = analysis.category && analysis.category !== '其他' ? analysis.category : null;
-    const subLabel = analysis.labels[0] && analysis.labels[0] !== category ? analysis.labels[0] : null;
-
-    let targetFolderId = null;
-
-    if (category) {
-      // 查找或创建一级分类文件夹
-      let catFolder = await Folder.findOne({
-        owner: userId, parent: null, name: category, isDeleted: false
-      });
-      if (!catFolder) {
-        catFolder = new Folder({
-          name: category, owner: userId, parent: null,
-          path: '/' + category, depth: 1, order: 0
-        });
-        await catFolder.save();
-      }
-
-      targetFolderId = catFolder._id;
-
-      // 如果有子标签，创建二级文件夹
-      if (subLabel && analysis.confidence >= 70) {
-        let subFolder = await Folder.findOne({
-          owner: userId, parent: catFolder._id, name: subLabel, isDeleted: false
-        });
-        if (!subFolder) {
-          subFolder = new Folder({
-            name: subLabel, owner: userId, parent: catFolder._id,
-            path: '/' + category + '/' + subLabel, depth: 2, order: 0
-          });
-          await subFolder.save();
-        }
-        targetFolderId = subFolder._id;
-      }
-    }
-
-    // 2. 重命名（纯字母/数字文件名）
-    if (analysis.summary && /^[a-zA-Z0-9._-]+$/.test(fileDoc.originalName)) {
-      const ext = fileDoc.extension;
-      const baseName = analysis.summary.length > 30
-        ? analysis.summary.slice(0, 30)
-        : analysis.summary;
-      // 清理文件名中的特殊字符
-      const cleanName = baseName.replace(/[<>:"/\\|?*]/g, '').trim();
-      if (cleanName) {
-        fileDoc.originalName = cleanName + ext;
-      }
-    }
-
-    // 3. 移动文件到目标文件夹
-    if (targetFolderId) {
-      fileDoc.folder = targetFolderId;
-    }
-
-    await fileDoc.save();
-    console.log('[AI] Organized:', fileDoc.originalName, '→', analysis.category + (subLabel ? '/' + subLabel : ''));
-  } catch (e) {
-    console.warn('[AI] Auto-organize failed:', e.message);
-  }
 }
 
 module.exports = fileController;

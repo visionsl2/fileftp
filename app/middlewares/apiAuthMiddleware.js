@@ -22,8 +22,8 @@ const verifyApiToken = async (req, res, next) => {
       });
     }
 
-    const decoded = jwt.verify(token, authConfig.JWT_SECRET);
-
+    // API Token 是 generateApiToken() 生成的随机字符串，不是 JWT
+    // 直接用 token 字符串查库匹配即可
     const user = await User.findOne({
       apiToken: token,
       isActive: true
@@ -49,13 +49,7 @@ const verifyApiToken = async (req, res, next) => {
     req.userId = user._id;
     next();
   } catch (error) {
-    if (error.name === 'JsonWebTokenError') {
-      return res.status(401).json({
-        success: false,
-        error: 'INVALID_TOKEN',
-        message: '令牌格式错误'
-      });
-    }
+    console.error('[API Auth] Error:', error);
     return res.status(500).json({
       success: false,
       error: 'AUTH_ERROR',

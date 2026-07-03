@@ -1,0 +1,46 @@
+<% files.forEach(function(file) { %>
+<% const isImage = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.svg', '.ico'].includes(file.extension.toLowerCase()); %>
+<% const isVideo = ['.mp4', '.avi', '.mov', '.wmv', '.flv', '.mkv', '.webm', '.m4v', '.3gp'].includes(file.extension.toLowerCase()); %>
+<div class="file-item file-item-row" data-type="file" data-id="<%= file._id %>" data-image="<%= isImage %>" data-video="<%= isVideo %>" data-ai-pending="<%= file.aiAnalysis && !file.aiAnalysis.analyzed ? 'true' : 'false' %>" draggable="true">
+  <input type="checkbox" class="file-checkbox" data-id="<%= file._id %>">
+  <% if (isImage || (isVideo && file.thumb)) { %>
+  <div class="file-thumb-container" data-full-url="<%= isVideo ? '/files/' + file._id + '/stream' : '/files/' + file._id + '/preview' %>" data-type="<%= isVideo ? 'video' : 'image' %>">
+    <% if (isVideo && file.thumb) { %>
+    <img src="/files/<%= file._id %>/thumb" class="file-thumb" alt="<%= file.originalName %>" loading="lazy">
+    <div class="video-play-overlay">
+      <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+    </div>
+    <% } else { %>
+    <img src="/files/<%= file._id %>/thumb" class="file-thumb" alt="<%= file.originalName %>" loading="lazy">
+    <% } %>
+  </div>
+  <% } else { %>
+  <div class="file-icon <%= getFileIconClass(file.extension) %>">
+    <%- getFileIcon(file.extension) %>
+  </div>
+  <% } %>
+  <div class="file-name" title="<%= file.originalName %>"><%= file.originalName %></div>
+  <% if (file.aiAnalysis && file.aiAnalysis.analyzed) { %>
+  <div class="file-ai-info">
+    <span class="ai-category-badge" title="置信度 <%= file.aiAnalysis.confidence %>%"><%= file.aiAnalysis.category %></span>
+    <% if (file.aiAnalysis.summary) { %>
+    <span class="ai-summary"><%= file.aiAnalysis.summary %></span>
+    <% } %>
+  </div>
+  <% } else if (file.aiAnalysis && !file.aiAnalysis.analyzed) { %>
+  <div class="file-ai-info">
+    <span class="ai-pending-badge">AI分析中...</span>
+  </div>
+  <% } %>
+  <div class="file-size"><%= formatFileSize(file.size) %></div>
+  <div class="file-date"><%= formatDate(file.updatedAt) %></div>
+  <div class="file-actions">
+    <a href="/files/<%= file._id %>/download" class="action-btn download" title="下载">
+      <svg viewBox="0 0 24 24"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>
+    </a>
+    <button class="action-btn delete-file" data-id="<%= file._id %>" title="删除">
+      <svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1-1H5v2h14V4z"/></svg>
+    </button>
+  </div>
+</div>
+<% }) %>

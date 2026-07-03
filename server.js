@@ -67,12 +67,13 @@ dbConn.then(async () => {
 }).catch(() => {});
 
 // 启动时清理上次上传失败留下的孤儿文件
-setTimeout(async () => {
-  if (mongoose.connection.readyState === 1) {
-    const storageService = require('./app/services/storageService');
-    await storageService.cleanOrphanFiles().catch(() => {});
-  }
-}, 3000);
+// 启动孤儿文件清理已禁用（由 ADMIN_CLEANUP=true 手动触发）
+// setTimeout(async () => {
+//   if (mongoose.connection.readyState === 1) {
+//     const storageService = require('./app/services/storageService');
+//     await storageService.cleanOrphanFiles().catch(() => {});
+//   }
+// }, 3000);
 
 // ==================== 中间件配置 ====================
 
@@ -172,6 +173,9 @@ const PORT = process.env.PORT || 3000;
 const server = app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
-server.timeout = 120 * 60 * 1000;  // 全局 10 分钟超时
+server.timeout = 120 * 60 * 1000;  // 全局 2小时 超时
 server.headersTimeout = 120 * 60 * 1000 + 1000;
 server.keepAliveTimeout = 120 * 60 * 1000 + 1000;
+
+const pkg = require('./package.json');
+console.log(`赛博网盘 V${pkg.version} 已启动`);
