@@ -92,44 +92,111 @@ function scheduleAiAnalysis(pendingFiles) {
 
 /**
  * 自动归类 + 重命名
+ *
+ * 规则（白名单策略）：
+ * - AI 不允许创建新分类，只允许放进用户已有的根级文件夹
+ * - 子分类也走同样规则：父文件夹必须已存在，子文件夹也必须已存在
+ * - 父/子 任一不存在 → 文件落"其他"根级文件夹
+ * - "其他"文件夹首次需要时自动创建
+ * - aiAnalysis.category 字段同步覆盖为实际归类名（保持 UI 一致）
  */
+// 同义词白名单：把细分类归并到通用类
+const SUBFOLDER_ALIASES = {
+  // 交通 - 船
+  '货船': '船', '轮船': '船', '邮轮': '船', '渡轮': '船',
+  '客船': '船', '油轮': '船', '渔船': '船', '游船': '船',
+  '货轮': '船', '舰艇': '船', '军舰': '船', '船舶': '船',
+  '汽艇': '船', '帆船': '船', '快艇': '船', '小船': '船',
+  // 交通 - 车
+  '货车': '车', '卡车': '卡车头', '卡车头': '卡车头',
+  '电动车': '电动车', '电瓶车': '电动车',
+  '摩托车': '摩托车', '机车': '摩托车',
+  '自行车': '自行车', '单车': '自行车', '脚踏车': '自行车',
+  '轿车': '轿车', '跑车': '跑车', '越野车': '轿车', '出租车': '轿车',
+  '公共汽车': '公交车', '大巴': '公交车', '公交车': '公交车',
+  // 动物
+  '小猫': '猫', '小狗': '狗', '小鸡': '鸡', '小鸭': '鸭',
+  '黄牛': '牛', '水牛': '牛', '奶牛': '牛',
+  '公鸡': '鸡', '母鸡': '鸡',
+  // 食物
+  '面条': '面食', '包子': '面食', '饺子': '面食', '馒头': '面食',
+  '蛋糕': '甜点', '糖果': '甜点', '巧克力': '甜点',
+  // 风景
+  '山峰': '山', '雪山': '山', '火山': '山', '丘陵': '山',
+  '大河': '河', '小河': '河', '溪流': '河',
+  // 人物
+  '人像': '人', '肖像': '人', '男士': '人', '女士': '人',
+  '小孩': '儿童', '宝宝': '儿童', '婴儿': '儿童',
+};
+
+// 通用词（不作为子目录）
+const GENERIC_LABELS = ['风景', '其他', '通用', '自然', '场景', '室内', '室外', '人造'];
+
+function normalizeSubLabel(label) {
+  if (!label) return null;
+  if (SUBFOLDER_ALIASES[label]) return SUBFOLDER_ALIASES[label];
+  if (GENERIC_LABELS.includes(label)) return null;
+  return label;
+}
+
 async function autoOrganizeFile(fileDoc, analysis, userId, storageService) {
   try {
     const Folder = require('../models/Folder');
 
-    const category = analysis.category && analysis.category !== '其他' ? analysis.category : null;
-    const subLabel = analysis.labels[0] && analysis.labels[0] !== category ? analysis.labels[0] : null;
+    // 1. 加载白名单：用户所有根级文件夹
+    let rootFolders = await Folder.find({
+      owner: userId, parent: null, isDeleted: false
+    });
 
-    let targetFolderId = null;
-
-    if (category) {
-      let catFolder = await Folder.findOne({
-        owner: userId, parent: null, name: category, isDeleted: false
+    // 2. 确保"其他"根级文件夹存在（首次自动建）
+    let otherFolder = rootFolders.find(f => f.name === '其他');
+    if (!otherFolder) {
+      otherFolder = new Folder({
+        name: '其他', owner: userId, parent: null,
+        path: '/其他', depth: 1, order: 0
       });
-      if (!catFolder) {
-        catFolder = new Folder({
-          name: category, owner: userId, parent: null,
-          path: '/' + category, depth: 1, order: 0
-        });
-        await catFolder.save();
-      }
-      targetFolderId = catFolder._id;
-
-      if (subLabel && analysis.confidence >= 70) {
-        let subFolder = await Folder.findOne({
-          owner: userId, parent: catFolder._id, name: subLabel, isDeleted: false
-        });
-        if (!subFolder) {
-          subFolder = new Folder({
-            name: subLabel, owner: userId, parent: catFolder._id,
-            path: '/' + category + '/' + subLabel, depth: 2, order: 0
-          });
-          await subFolder.save();
-        }
-        targetFolderId = subFolder._id;
-      }
+      await otherFolder.save();
+      rootFolders.push(otherFolder);
     }
 
+    const rawCategory = analysis.category;
+    const category = rawCategory && rawCategory !== '其他' ? rawCategory : null;
+
+    // 3. 校验 category 是否在白名单（用户根级文件夹）
+    const catFolder = category ? rootFolders.find(f => f.name === category) : null;
+
+    let targetFolderId = null;
+    let actualCategory = '其他'; // 实际归类名（写回 file.aiAnalysis.category）
+    let subLabel = null;
+
+    if (catFolder) {
+      // 4. 父目录命中 → 尝试匹配子文件夹
+      subLabel = analysis.labels[0] && analysis.labels[0] !== category
+        ? normalizeSubLabel(analysis.labels[0]) : null;
+
+      if (subLabel && analysis.confidence >= 70) {
+        const subFolder = await Folder.findOne({
+          owner: userId, parent: catFolder._id, name: subLabel, isDeleted: false
+        });
+        if (subFolder) {
+          // 子文件夹存在 → 进子目录
+          targetFolderId = subFolder._id;
+        } else {
+          // 子文件夹不存在 → 回落父目录，**不新建**
+          targetFolderId = catFolder._id;
+        }
+        actualCategory = catFolder.name;
+      } else {
+        targetFolderId = catFolder._id;
+        actualCategory = catFolder.name;
+      }
+    } else {
+      // 5. category 不在白名单 → 落"其他"，同步覆盖 aiAnalysis.category
+      targetFolderId = otherFolder._id;
+      actualCategory = '其他';
+    }
+
+    // 6. 重命名（保留旧逻辑）
     if (analysis.summary && /^[a-zA-Z0-9._-]+$/.test(fileDoc.originalName)) {
       const ext = fileDoc.extension;
       const baseName = analysis.summary.length > 30 ? analysis.summary.slice(0, 30) : analysis.summary;
@@ -139,11 +206,14 @@ async function autoOrganizeFile(fileDoc, analysis, userId, storageService) {
       }
     }
 
+    // 7. 同步覆盖 aiAnalysis.category（保持 UI category 字段与 file.folder 一致）
+    fileDoc.aiAnalysis.category = actualCategory;
+
     if (targetFolderId) {
       fileDoc.folder = targetFolderId;
     }
     await fileDoc.save();
-    console.log('[AI] Organized:', fileDoc.originalName, '→', analysis.category + (subLabel ? '/' + subLabel : ''));
+    console.log('[AI] Organized:', fileDoc.originalName, '→', actualCategory + (subLabel && targetFolderId !== catFolder?._id ? '/' + subLabel : ''));
   } catch (e) {
     console.warn('[AI] Auto-organize failed:', e.message);
   }

@@ -48,12 +48,14 @@ const fileController = {
       const user = await User.findById(userId);
 
       // 查询文件和文件夹（按更新时间倒序，分页）
+      // 只 select 需要的字段，减少响应体积
+      const fileFields = 'originalName extension mimeType size sha256 folder updatedAt thumb aiAnalysis';
       const [files, folders, recentFiles, totalFiles] = await Promise.all([
         File.find({
           owner: userId,
           folder: folder || null,
           isDeleted: false
-        }).sort({ updatedAt: -1 }).skip(skip).limit(limitNum).lean(),
+        }).select(fileFields).sort({ updatedAt: -1 }).skip(skip).limit(limitNum).lean(),
         Folder.find({
           owner: userId,
           parent: folder || null,
@@ -62,7 +64,7 @@ const fileController = {
         File.find({
           owner: userId,
           isDeleted: false
-        }).sort({ createdAt: -1 }).limit(10).lean(),
+        }).select(fileFields).sort({ createdAt: -1 }).limit(10).lean(),
         File.countDocuments({
           owner: userId,
           folder: folder || null,
@@ -121,12 +123,13 @@ const fileController = {
       const limitNum = Math.min(200, Math.max(1, parseInt(limit) || 50));
       const skip = (pageNum - 1) * limitNum;
 
+      const fileFields = 'originalName extension mimeType size sha256 folder updatedAt thumb aiAnalysis';
       const [files, totalFiles] = await Promise.all([
         File.find({
           owner: userId,
           folder: folder || null,
           isDeleted: false
-        }).sort({ updatedAt: -1 }).skip(skip).limit(limitNum).lean(),
+        }).select(fileFields).sort({ updatedAt: -1 }).skip(skip).limit(limitNum).lean(),
         File.countDocuments({
           owner: userId,
           folder: folder || null,
@@ -153,6 +156,93 @@ const fileController = {
       });
     } catch (error) {
       console.error('loadMoreFiles error:', error);
+      res.status(500).json({ success: false, message: '加载更多失败' });
+    }
+  },
+
+  /**
+   * 总览页：按上传时间倒序展示所有文件
+   * GET /files/gallery
+   * 仅当前用户，不可跨用户访问
+   */
+  showGallery: async (req, res) => {
+    try {
+      const userId = req.userId || req.session?.userId;
+      if (!userId) return res.redirect('/auth/login');
+
+      const pageNum = 1;
+      const limitNum = 50;
+      const skip = 0;
+      const fileFields = 'originalName extension mimeType size folder updatedAt thumb';
+
+      const [user, files, totalFiles] = await Promise.all([
+        User.findById(userId),
+        File.find({ owner: userId, isDeleted: false })
+          .select(fileFields)
+          .sort({ createdAt: -1 })
+          .skip(skip)
+          .limit(limitNum)
+          .lean(),
+        File.countDocuments({ owner: userId, isDeleted: false })
+      ]);
+
+      const aiQuota = await getAiQuota(user);
+
+      res.render('files/gallery', {
+        files,
+        user,
+        aiQuota,
+        pagination: { page: pageNum, limit: limitNum, total: totalFiles, totalPages: Math.ceil(totalFiles / limitNum) },
+        title: '总览',
+        formatFileSize: helpers.formatFileSize,
+        formatDate: helpers.formatDate
+      });
+    } catch (error) {
+      console.error('showGallery error:', error);
+      res.status(500).json({ success: false, message: '加载总览失败' });
+    }
+  },
+
+  /**
+   * 总览页滚动加载更多
+   * GET /files/gallery/more?page=2
+   */
+  loadMoreGallery: async (req, res) => {
+    try {
+      const userId = req.userId || req.session?.userId;
+      if (!userId) return res.status(401).json({ success: false, message: '未认证' });
+
+      const pageNum = Math.max(1, parseInt(req.query.page) || 1);
+      const limitNum = 50;
+      const skip = (pageNum - 1) * limitNum;
+      const fileFields = 'originalName extension mimeType size folder updatedAt thumb';
+
+      const [files, totalFiles] = await Promise.all([
+        File.find({ owner: userId, isDeleted: false })
+          .select(fileFields)
+          .sort({ createdAt: -1 })
+          .skip(skip)
+          .limit(limitNum)
+          .lean(),
+        File.countDocuments({ owner: userId, isDeleted: false })
+      ]);
+
+      res.render('files/_gallery_item_partial', {
+        files,
+        formatFileSize: helpers.formatFileSize,
+        formatDate: helpers.formatDate
+      }, (err, html) => {
+        if (err) return res.status(500).json({ success: false, message: '渲染失败' });
+        res.json({
+          success: true,
+          html,
+          hasMore: skip + files.length < totalFiles,
+          nextPage: pageNum + 1,
+          total: totalFiles
+        });
+      });
+    } catch (error) {
+      console.error('loadMoreGallery error:', error);
       res.status(500).json({ success: false, message: '加载更多失败' });
     }
   },
@@ -581,6 +671,21 @@ const fileController = {
         return res.status(404).json({ success: false, message: '文件不存在' });
       }
 
+      // 解析文件夹路径（如 "风景/黄昏"）
+      let folderPath = '';
+      if (file.folder) {
+        const segments = [];
+        let currentId = file.folder;
+        // 最多向上找 10 层防死循环
+        for (let i = 0; i < 10 && currentId; i++) {
+          const f = await Folder.findById(currentId).select('name parent').lean();
+          if (!f) break;
+          segments.unshift(f.name);
+          currentId = f.parent;
+        }
+        folderPath = segments.join('/');
+      }
+
       res.json({
         success: true,
         file: {
@@ -590,12 +695,66 @@ const fileController = {
           type: file.mimeType,
           extension: file.extension,
           createdAt: file.createdAt,
-          downloads: file.stats.downloads
+          updatedAt: file.updatedAt,
+          downloads: file.stats.downloads,
+          folderId: file.folder ? file.folder.toString() : null,
+          folderPath,
+          thumb: file.thumb ? { path: file.thumb.path, width: file.thumb.width, height: file.thumb.height } : null,
+          aiAnalysis: file.aiAnalysis || null
         }
       });
     } catch (error) {
       console.error('getFileInfo error:', error);
       res.status(500).json({ success: false, message: '获取文件信息失败' });
+    }
+  },
+
+  /**
+   * 更新文件 AI 分析结果（分类 / 描述 / 标签）
+   * PATCH /files/:id/ai-analysis
+   * Body: { category?, summary?, labels? }
+   */
+  updateAiAnalysis: async (req, res) => {
+    try {
+      const userId = req.userId || req.session?.userId;
+      const { category, summary, labels } = req.body || {};
+
+      const file = await File.findOne({
+        _id: req.params.id,
+        owner: userId,
+        isDeleted: false
+      });
+      if (!file) {
+        return res.status(404).json({ success: false, message: '文件不存在' });
+      }
+
+      // 初始化 aiAnalysis（若不存在）
+      if (!file.aiAnalysis) file.aiAnalysis = {};
+
+      if (typeof category === 'string') {
+        file.aiAnalysis.category = category.trim();
+      }
+      if (typeof summary === 'string') {
+        file.aiAnalysis.summary = summary.trim();
+      }
+      if (Array.isArray(labels)) {
+        file.aiAnalysis.labels = labels
+          .filter(l => typeof l === 'string' && l.trim())
+          .map(l => l.trim())
+          .slice(0, 20); // 最多 20 个标签
+      }
+      file.aiAnalysis.analyzed = true;
+      file.aiAnalysis.analyzedAt = file.aiAnalysis.analyzedAt || new Date();
+
+      await file.save();
+
+      res.json({
+        success: true,
+        aiAnalysis: file.aiAnalysis
+      });
+    } catch (error) {
+      console.error('updateAiAnalysis error:', error);
+      res.status(500).json({ success: false, message: '更新失败' });
     }
   },
 
@@ -627,19 +786,46 @@ const fileController = {
       }
 
       // 设置缓存头（7天 + ETag）
+      // 注意：ETag 用 thumbVersion（含 thumb 生成状态），避免"生成前访问过→缓存了原图/占位"后拿不到新缩略图
+      const thumbVersion = (file.thumb && file.thumb.path) ? 't1' : 't0';
+      const etag = '"' + file._id.toString() + '-' + thumbVersion + '"';
       res.setHeader('Cache-Control', 'public, max-age=604800, immutable');
-      res.setHeader('ETag', '\"' + file._id.toString() + '\"');
+      res.setHeader('ETag', etag);
       res.setHeader('Content-Type', 'image/jpeg');
 
       // ETag 协商缓存：客户端 If-None-Match 匹配则返回 304（无 body）
-      if (req.headers['if-none-match'] === '\"' + file._id.toString() + '\"') {
+      if (req.headers['if-none-match'] === etag) {
         return res.status(304).end();
       }
 
-      // 如果有缩略图，返回缩略图；否则返回原图
       let filePath = storageService.resolvePath(file.storage.path);
+
       if (file.thumb && file.thumb.path) {
+        // 已有缩略图 → 直接返回
         filePath = storageService.resolvePath(file.thumb.path);
+      } else {
+        // 无缩略图 → 图片实时生成并回填（避免返回几MB原图）
+        const imageExts = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.svg', '.ico'];
+        const isImg = imageExts.includes(file.extension.toLowerCase());
+        if (isImg) {
+          try {
+            const thumb = await storageService.generateThumbnail(
+              filePath, file._id.toString(), userId
+            );
+            if (thumb && thumb.path) {
+              file.thumb = thumb;
+              await file.save();
+              filePath = storageService.resolvePath(thumb.path);
+              // 生成成功后 thumbVersion 变化，刷新 ETag 让浏览器缓存新缩略图
+              res.setHeader('ETag', '"' + file._id.toString() + '-t1"');
+            }
+            // thumb 为 null（sharp 不可用）时 filePath 保持原图兜底
+          } catch (thumbErr) {
+            console.warn('[Thumbnail] 实时生成失败，回退原图:', file._id.toString(), thumbErr.message);
+            // 保持 filePath = 原图兜底
+          }
+        }
+        // 视频无 thumb 时 filePath 保持原图（前端仅在 hasThumb 时才请求视频 thumb，通常不会走到）
       }
 
       const readStream = storageService.createReadStream(filePath);
@@ -681,9 +867,15 @@ const fileController = {
         return res.status(400).json({ success: false, message: '不是图片文件' });
       }
 
-      res.setHeader('Cache-Control', 'public, max-age=86400');
+      res.setHeader('Cache-Control', 'public, max-age=604800, immutable');
+      res.setHeader('ETag', '"' + file._id.toString() + '"');
       res.setHeader('Content-Type', file.mimeType);
       res.setHeader('Content-Length', file.size);
+
+      // ETag 协商缓存：返回 304 跳过 body 传输
+      if (req.headers['if-none-match'] === '"' + file._id.toString() + '"') {
+        return res.status(304).end();
+      }
 
       const readStream = storageService.createReadStream(storageService.resolvePath(file.storage.path));
       readStream.on('error', (err) => {
@@ -1040,6 +1232,102 @@ const fileController = {
       if (!res.headersSent) {
         res.status(500).json({ success: false, message: '分析失败' });
       }
+    }
+  },
+
+  /**
+   * 单文件重新 AI 分析（用于预览界面"重新分析"按钮）
+   * POST /files/:id/analyze
+   */
+  reanalyzeFile: async (req, res) => {
+    try {
+      const userId = req.userId || req.session?.userId;
+      const file = await File.findOne({
+        _id: req.params.id,
+        owner: userId,
+        isDeleted: false
+      });
+      if (!file) {
+        return res.status(404).json({ success: false, message: '文件不存在' });
+      }
+
+      // 配额检查
+      const user = await User.findById(userId);
+      const quotaOk = await aiQueue.checkAiQuota(user);
+      if (!quotaOk) {
+        return res.status(429).json({ success: false, message: '本月 AI 分析配额已用完' });
+      }
+
+      // 标记为待分析
+      file.aiAnalysis = { analyzed: false };
+      await file.save();
+
+      // 后台异步分析
+      const storageService = require('../services/storageService');
+      const aiService = require('../services/aiService');
+      const ext = (file.extension || '').toLowerCase();
+      const isMedia = storageService.isImage(ext) || storageService.isVideo(ext);
+
+      if (!isMedia) {
+        return res.json({ success: true, status: 'skipped', message: '非图片/视频文件' });
+      }
+
+      setImmediate(async () => {
+        try {
+          const filePath = storageService.resolvePath(file.storage.path);
+          const analysis = storageService.isVideo(ext)
+            ? await aiService.analyzeVideo(filePath)
+            : await aiService.analyzeImage(filePath);
+
+          if (analysis && analysis.labels && analysis.labels.length > 0) {
+            const doc = await File.findById(file._id);
+            if (doc) {
+              doc.aiAnalysis = {
+                analyzed: true,
+                analyzedAt: new Date(),
+                labels: analysis.labels,
+                category: analysis.category,
+                confidence: analysis.confidence,
+                summary: analysis.summary || '',
+                objects: analysis.objects || [],
+                scene: analysis.scene || '',
+                text: analysis.text || '',
+                model: process.env.AI_MODEL || 'gpt-4o',
+                promptTokens: analysis.promptTokens || 0,
+                completionTokens: analysis.completionTokens || 0,
+                totalTokens: analysis.totalTokens || 0
+              };
+              await doc.save();
+
+              if (process.env.AI_AUTO_ORGANIZE === 'true') {
+                try {
+                  await aiQueue.autoOrganizeFile(doc, analysis, userId, storageService);
+                } catch (orgErr) {
+                  console.warn('[AI] Auto-organize failed:', orgErr.message);
+                }
+              }
+              console.log('[AI] Reanalyze done:', doc._id);
+            }
+          } else {
+            // 分析失败或无结果，标记为已完成避免一直 pending
+            await File.findByIdAndUpdate(file._id, {
+              'aiAnalysis.analyzed': true,
+              'aiAnalysis.analyzedAt': new Date()
+            });
+          }
+        } catch (err) {
+          console.error('[AI] Reanalyze failed:', err.message);
+          await File.findByIdAndUpdate(file._id, {
+            'aiAnalysis.analyzed': true,
+            'aiAnalysis.analyzedAt': new Date()
+          }).catch(() => {});
+        }
+      });
+
+      res.json({ success: true, status: 'pending' });
+    } catch (error) {
+      console.error('reanalyzeFile error:', error);
+      res.status(500).json({ success: false, message: '启动分析失败' });
     }
   }
 };

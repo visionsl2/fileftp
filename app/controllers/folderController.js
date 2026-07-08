@@ -168,6 +168,80 @@ const folderController = {
       console.error('deleteFolder error:', error);
       res.status(500).json({ success: false, message: '删除失败' });
     }
+  },
+
+  /**
+   * 合并文件夹：把源文件夹下所有文件移动到目标文件夹，删除源文件夹
+   * POST /folders/:id/merge-into
+   * Body: { targetFolderId: 'xxx' }
+   */
+  mergeFolderInto: async (req, res) => {
+    try {
+      const userId = req.userId || req.session?.userId;
+      if (!userId) {
+        return res.status(401).json({ success: false, message: '未认证' });
+      }
+
+      const sourceId = req.params.id;
+      const { targetFolderId } = req.body || {};
+
+      if (!targetFolderId) {
+        return res.status(400).json({ success: false, message: '缺少目标文件夹ID' });
+      }
+      if (sourceId === targetFolderId) {
+        return res.status(400).json({ success: false, message: '源和目标不能相同' });
+      }
+
+      // 验证源文件夹
+      const source = await Folder.findOne({ _id: sourceId, owner: userId });
+      if (!source) {
+        return res.status(404).json({ success: false, message: '源文件夹不存在' });
+      }
+
+      // 验证目标文件夹
+      const target = await Folder.findOne({ _id: targetFolderId, owner: userId });
+      if (!target) {
+        return res.status(404).json({ success: false, message: '目标文件夹不存在' });
+      }
+
+      // 统计源下文件数（移动前）
+      const fileCount = await File.countDocuments({
+        owner: userId,
+        folder: sourceId,
+        isDeleted: { $ne: true }
+      });
+
+      // 移动所有文件
+      if (fileCount > 0) {
+        await File.updateMany(
+          { owner: userId, folder: sourceId, isDeleted: { $ne: true } },
+          { $set: { folder: targetFolderId } }
+        );
+      }
+
+      // 验证源已清空
+      const remaining = await File.countDocuments({
+        owner: userId, folder: sourceId, isDeleted: { $ne: true }
+      });
+      if (remaining > 0) {
+        return res.status(500).json({
+          success: false,
+          message: '源文件夹未完全清空（剩余 ' + remaining + ' 个文件），未删除源'
+        });
+      }
+
+      // 删除源文件夹
+      await Folder.deleteOne({ _id: sourceId, owner: userId });
+
+      res.json({
+        success: true,
+        movedFiles: fileCount,
+        deletedFolder: source.name
+      });
+    } catch (error) {
+      console.error('mergeFolderInto error:', error);
+      res.status(500).json({ success: false, message: '合并失败' });
+    }
   }
 };
 

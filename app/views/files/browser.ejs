@@ -4,32 +4,12 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title><%= title %> - 赛博网盘</title>
-  <link rel="stylesheet" href="/css/filebrowser.css">
+  <!-- 静态资源带 ?v= 版本号，部署时手动 bump，强制浏览器刷新缓存 -->
+  <link rel="stylesheet" href="/css/filebrowser.css?v=20260707-1">
 </head>
 <body>
   <div class="app-container">
-    <header class="app-header">
-      <div class="header-left">
-        <h1 class="app-title">赛博网盘</h1>
-      </div>
-      <div class="header-right">
-        <span class="username"><%= user.username %></span>
-        <span class="storage-info">
-          <%= (user.storageUsed / 1024 / 1024).toFixed(1) %> / <%= (user.storageQuota / 1024 / 1024 / 1024).toFixed(1) %> GB
-        </span>
-        <% if (user.role === 'admin') { %>
-        <span class="ai-quota admin">🤖 管理员</span>
-        <% } else if (aiQuota && aiQuota.limited) { %>
-        <span class="ai-quota <%= aiQuota.percent >= 80 ? 'warn' : '' %>" title="本月 AI 分析配额">
-          🤖 <%= aiQuota.used %>/<%= aiQuota.limit %>
-        </span>
-        <% } %>
-        <% if (user.role === 'admin') { %>
-        <a href="/admin" class="btn-logout" style="margin-right:8px;background:rgba(255,255,255,0.15)">⚙️ 管理</a>
-        <% } %>
-        <a href="/auth/logout" class="btn-logout">退出</a>
-      </div>
-    </header>
+    <%- include('_navbar', { user: user, aiQuota: aiQuota, currentPage: 'files' }) %>
 
     <main class="main-content">
       <div class="layout">
@@ -45,6 +25,40 @@
             </div>
           </div>
         </aside>
+        <!-- 右键菜单（侧边栏文件夹） -->
+        <div class="context-menu" id="folderContextMenu" style="display:none">
+          <div class="context-menu-item" data-action="rename">
+            <span class="context-menu-icon">✏️</span> 重命名
+          </div>
+          <div class="context-menu-item" data-action="merge">
+            <span class="context-menu-icon">📁</span> 合并到...
+          </div>
+          <div class="context-menu-divider"></div>
+          <div class="context-menu-item danger" data-action="delete">
+            <span class="context-menu-icon">🗑️</span> 删除
+          </div>
+        </div>
+
+        <!-- 合并目标选择 modal -->
+        <div id="mergeFolderModal" class="modal">
+          <div class="modal-dialog modal-md">
+            <div class="modal-header">
+              <h3 id="mergeFolderTitle">合并文件夹</h3>
+              <button class="modal-close-btn" id="closeMergeFolderModal">&times;</button>
+            </div>
+            <div class="modal-body">
+              <div class="merge-info" id="mergeInfo"></div>
+              <div class="merge-target-list" id="mergeTargetList">
+                <div class="merge-loading">加载中...</div>
+              </div>
+            </div>
+            <div class="modal-footer">
+              <button class="btn" id="cancelMergeFolderBtn">取消</button>
+              <button class="btn btn-primary" id="confirmMergeFolderBtn" disabled>确定</button>
+            </div>
+          </div>
+        </div>
+
         <div class="content-area" id="contentArea">
       <div class="toolbar">
         <div class="toolbar-left">
@@ -155,18 +169,18 @@
           <% files.forEach(function(file) { %>
             <% const isImage = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.svg', '.ico'].includes(file.extension.toLowerCase()); %>
             <% const isVideo = ['.mp4', '.avi', '.mov', '.wmv', '.flv', '.mkv', '.webm', '.m4v', '.3gp'].includes(file.extension.toLowerCase()); %>
+            <% const hasThumb = file.thumb && file.thumb.path; %>
             <div class="file-item file-item-row" data-type="file" data-id="<%= file._id %>" data-image="<%= isImage %>" data-video="<%= isVideo %>" draggable="true">
               <input type="checkbox" class="file-checkbox" data-id="<%= file._id %>">
-              <% if (isImage || (isVideo && file.thumb)) { %>
+              <% if (isImage || (isVideo && hasThumb)) { %>
               <div class="file-thumb-container" data-full-url="<%= isVideo ? '/files/' + file._id + '/stream' : '/files/' + file._id + '/preview' %>" data-type="<%= isVideo ? 'video' : 'image' %>">
-                <% if (isVideo && file.thumb) { %>
-                <img src="/files/<%= file._id %>/thumb" class="file-thumb" alt="<%= file.originalName %>" loading="lazy">
+                <% if (isVideo) { %>
                 <div class="video-play-overlay">
                   <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
                 </div>
-                <% } else { %>
-                <img src="/files/<%= file._id %>/thumb" class="file-thumb" alt="<%= file.originalName %>" loading="lazy">
                 <% } %>
+                <img src="/files/<%= file._id %>/thumb" class="file-thumb" alt="<%= file.originalName %>" loading="lazy" width="64" height="64"
+                     onerror="this.onerror=null; this.style.display='none'; this.parentElement.classList.add('thumb-failed'); this.parentElement.setAttribute('data-fallback-icon', '<%= file.extension.toUpperCase().replace(/^./, '') %>');">
               </div>
               <% } else { %>
               <div class="file-icon <%= getFileIconClass(file.extension) %>">
@@ -217,16 +231,132 @@
     <input type="hidden" name="folder" value="<%= currentFolder || '' %>">
   </form>
 
-  <!-- 图片预览模态框 -->
+  <!-- 图片预览模态框（左右布局） -->
   <div id="imagePreviewModal" class="modal">
     <span class="modal-close">&times;</span>
-    <img class="modal-content" id="previewImg">
-    <div class="modal-footer">
-      <span id="previewFileName"></span>
-      <a href="#" class="btn-preview-download" id="previewDownloadBtn" target="_blank">
-        <svg viewBox="0 0 24 24"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>
-        下载
-      </a>
+    <div class="preview-container">
+      <!-- 左侧大图 -->
+      <div class="preview-left">
+        <div class="preview-image-wrap">
+          <img class="modal-content" id="previewImg">
+          <button class="preview-fullscreen-btn" id="previewFullscreenBtn" title="全屏查看">
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
+              <path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z"/>
+            </svg>
+          </button>
+          <div class="preview-loading" id="previewLoading">
+            <div class="spinner"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 右侧信息面板 -->
+      <div class="preview-right" id="previewRightPanel">
+        <div class="preview-section preview-header-section">
+          <div class="preview-name-row">
+            <h3 class="preview-filename" id="previewFileName">文件名</h3>
+            <a href="#" class="btn-preview-download" id="previewDownloadBtn" target="_blank">
+              <svg viewBox="0 0 24 24"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>
+              <span>下载</span>
+            </a>
+          </div>
+        </div>
+
+        <div class="preview-section">
+          <div class="preview-label">📂 路径</div>
+          <div class="preview-folder-edit">
+            <span class="preview-folder-path" id="previewFolderPath">—</span>
+            <button class="preview-folder-edit-btn" id="previewFolderEditBtn" title="修改位置">✏️</button>
+          </div>
+        </div>
+
+        <div class="preview-section preview-ai-section">
+          <div class="preview-label-row">
+            <div class="preview-label">AI 分析</div>
+            <button class="preview-reanalyze-btn" id="previewReanalyzeBtn" title="重新调用 AI 分析">
+              <svg viewBox="0 0 24 24" width="12" height="12" fill="currentColor"><path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg>
+              <span>重新分析</span>
+            </button>
+          </div>
+          <div class="preview-ai-fields" id="previewAiFields">
+            <div class="preview-ai-field">
+              <select class="preview-category-select" id="previewCategorySelect">
+                <option value="人物">人物</option>
+                <option value="动物">动物</option>
+                <option value="风景">风景</option>
+                <option value="食物">食物</option>
+                <option value="交通">交通</option>
+                <option value="建筑">建筑</option>
+                <option value="电子">电子</option>
+                <option value="文档">文档</option>
+                <option value="截图">截图</option>
+                <option value="其他">其他</option>
+              </select>
+              <span class="preview-save-hint" id="previewCategorySave"></span>
+            </div>
+            <div class="preview-ai-field">
+              <input type="text" class="preview-summary-input" id="previewSummaryInput" placeholder="一句话描述图片内容" maxlength="100">
+              <span class="preview-save-hint" id="previewSummarySave"></span>
+            </div>
+            <div class="preview-ai-field">
+              <div class="preview-tags" id="previewTags"></div>
+              <div class="preview-tag-add">
+                <input type="text" class="preview-tag-input" id="previewTagInput" placeholder="添加标签..." maxlength="20">
+                <button class="preview-tag-add-btn" id="previewTagAddBtn">添加</button>
+              </div>
+              <span class="preview-save-hint" id="previewTagsSave"></span>
+            </div>
+          </div>
+        </div>
+
+        <div class="preview-section">
+          <div class="preview-label">📊 文件信息</div>
+          <div class="preview-meta-grid">
+            <div class="preview-meta-item">
+              <span class="preview-meta-key">大小</span>
+              <span class="preview-meta-val" id="previewSize">—</span>
+            </div>
+            <div class="preview-meta-item">
+              <span class="preview-meta-key">类型</span>
+              <span class="preview-meta-val" id="previewType">—</span>
+            </div>
+            <div class="preview-meta-item">
+              <span class="preview-meta-key">上传时间</span>
+              <span class="preview-meta-val" id="previewCreated">—</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="preview-section preview-actions-section">
+          <button class="preview-delete-btn" id="previewDeleteBtn">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
+              <path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/>
+            </svg>
+            <span>删除文件</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 图片全屏查看器（lightbox） -->
+  <div id="lightboxOverlay" class="lightbox-overlay" style="display:none">
+    <img class="lightbox-image" id="lightboxImg">
+    <div class="lightbox-toolbar">
+      <button class="lightbox-btn" id="lbZoomOut" title="缩小 (-)">−</button>
+      <select class="lightbox-zoom-select" id="lbZoomSelect">
+        <option value="0.25">25%</option>
+        <option value="0.5">50%</option>
+        <option value="0.75">75%</option>
+        <option value="1" selected>100%</option>
+        <option value="1.5">150%</option>
+        <option value="2">200%</option>
+        <option value="3">300%</option>
+        <option value="4">400%</option>
+      </select>
+      <button class="lightbox-btn" id="lbZoomIn" title="放大 (+)">+</button>
+      <button class="lightbox-btn" id="lbRotate" title="旋转 90°">↻</button>
+      <button class="lightbox-btn lightbox-close" id="lbClose" title="关闭 (ESC)">✕</button>
     </div>
   </div>
 
@@ -251,6 +381,28 @@
       <svg viewBox="0 0 24 24"><path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM14 13v4h-4v-4H7l5-5 5 5h-3z"/></svg>
       <p>将文件拖拽到此处上传</p>
       <span class="drop-hint">支持单个或多个文件</span>
+    </div>
+  </div>
+
+  <!-- 预览-文件夹选择器（修改位置） -->
+  <div id="previewFolderPicker" class="modal">
+    <div class="modal-dialog modal-sm">
+      <div class="modal-header">
+        <h3>选择位置</h3>
+        <button class="modal-close-btn" id="closePreviewFolderPicker">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="folder-tree" id="previewFolderTree">
+          <div class="folder-item root" data-id="">
+            <span class="folder-icon">📂</span>
+            <span class="folder-name">全部文件（根目录）</span>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn" id="cancelPreviewFolderBtn">取消</button>
+        <button class="btn btn-primary" id="confirmPreviewFolderBtn">确定</button>
+      </div>
     </div>
   </div>
 
@@ -322,6 +474,6 @@
     </div>
   </div>
 
-  <script src="/js/filebrowser.js"></script>
+  <script src="/js/filebrowser.js?v=20260707-1"></script>
 </body>
 </html>

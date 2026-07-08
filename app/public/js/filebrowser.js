@@ -32,6 +32,8 @@ class FileBrowser {
     this.applyViewMode();
     this.pollAiStatus();
     this.initInfiniteScroll();
+    // 全局 Lightbox 实例（供图片预览和将来其他场景复用）
+    window.__lightbox = new Lightbox();
   }
 
   // 无限滚动加载更多
@@ -78,8 +80,7 @@ class FileBrowser {
         } else {
           if (sentinel) sentinel.textContent = '加载更多...';
         }
-        // 重新绑定事件到新元素
-        this.rebindFileActions();
+        // 委托事件无需重新绑定（事件已绑在 fileList 上）
       }
     } catch (e) {
       console.error('Load more error:', e);
@@ -124,51 +125,56 @@ class FileBrowser {
   }
 
   bindFolderEvents() {
-    // 只处理文件列表中的文件夹项（有 data-type="folder"）
-    document.querySelectorAll('.folder-item[data-type="folder"]').forEach(item => {
-      item.addEventListener('click', (e) => {
-        if (e.target.classList.contains('action-btn') || e.target.closest('.action-btn')) return;
-        const folderId = item.dataset.id;
-        this.navigateToFolder(folderId);
-      });
-    });
+    // 事件委托到 fileList 容器
+    const fileList = document.getElementById('fileList');
+    if (!fileList || fileList._folderEventsBound) return;
+    fileList._folderEventsBound = true;
 
-    document.querySelectorAll('.rename-folder').forEach(btn => {
-      btn.addEventListener('click', (e) => {
+    fileList.addEventListener('click', (e) => {
+      const renameBtn = e.target.closest('.rename-folder');
+      if (renameBtn) {
         e.stopPropagation();
-        const folderId = btn.dataset.id;
-        this.showRenameModal('folder', folderId, btn.closest('.folder-item').querySelector('.file-name')?.textContent || '');
-      });
-    });
-
-    document.querySelectorAll('.delete-folder').forEach(btn => {
-      btn.addEventListener('click', (e) => {
+        this.showRenameModal('folder', renameBtn.dataset.id,
+          renameBtn.closest('.folder-item').querySelector('.file-name')?.textContent || '');
+        return;
+      }
+      const deleteBtn = e.target.closest('.delete-folder');
+      if (deleteBtn) {
         e.stopPropagation();
-        const folderId = btn.dataset.id;
-        this.deleteFolder(folderId);
-      });
+        this.deleteFolder(deleteBtn.dataset.id);
+        return;
+      }
+      const folder = e.target.closest('.folder-item[data-type="folder"]');
+      if (folder && !e.target.closest('.action-btn')) {
+        this.navigateToFolder(folder.dataset.id);
+      }
     });
   }
 
   bindFileEvents() {
-    document.querySelectorAll('.delete-file').forEach(btn => {
-      btn.addEventListener('click', (e) => {
+    // 事件委托到 fileList 容器
+    const fileList = document.getElementById('fileList');
+    if (!fileList || fileList._fileEventsBound) return;
+    fileList._fileEventsBound = true;
+
+    fileList.addEventListener('click', (e) => {
+      const deleteBtn = e.target.closest('.delete-file');
+      if (deleteBtn) {
         e.preventDefault();
         e.stopPropagation();
-        const fileId = btn.dataset.id;
-        this.deleteFile(fileId);
-      });
+        this.deleteFile(deleteBtn.dataset.id);
+      }
     });
 
-    // Rename file button
-    document.querySelectorAll('.file-item-row[data-type="file"]').forEach(item => {
-      item.addEventListener('contextmenu', (e) => {
-        e.preventDefault();
-        const fileId = item.dataset.id;
-        const fileName = item.querySelector('.file-name')?.textContent || '';
-        this.showRenameModal('file', fileId, fileName);
-      });
+    fileList.addEventListener('contextmenu', (e) => {
+      const item = e.target.closest('.file-item-row[data-type="file"]');
+      if (!item) return;
+      e.preventDefault();
+      const fileName = item.querySelector('.file-name')?.textContent || '';
+      this.showRenameModal('file', item.dataset.id, fileName);
     });
+
+    // contextmenu 已委托到 fileList（见上方）
   }
 
   bindRefreshEvent() {
@@ -177,30 +183,25 @@ class FileBrowser {
     });
   }
 
-  // Selection handling
+  // Selection handling — 事件委托到 #fileList，只绑一次
   bindSelectionEvents() {
-    document.querySelectorAll('.file-checkbox').forEach(checkbox => {
-      checkbox.addEventListener('change', (e) => {
-        e.stopPropagation();
-        const fileId = checkbox.dataset.id;
-        if (checkbox.checked) {
-          this.selectedFiles.add(fileId);
-          checkbox.closest('.file-item')?.classList.add('selected');
-        } else {
-          this.selectedFiles.delete(fileId);
-          checkbox.closest('.file-item')?.classList.remove('selected');
-        }
-        this.updateBatchActions();
-      });
-    });
+    const fileList = document.getElementById('fileList');
+    if (!fileList || fileList._selectionBound) return;
+    fileList._selectionBound = true;
 
-    // Click on file item should not toggle checkbox (only checkbox click does)
-    document.querySelectorAll('.file-item-row').forEach(item => {
-      item.addEventListener('click', (e) => {
-        if (e.target.classList.contains('file-checkbox')) return;
-        if (e.target.closest('.file-actions') || e.target.closest('.file-thumb-container')) return;
-        // Could implement click to preview here
-      });
+    fileList.addEventListener('change', (e) => {
+      const checkbox = e.target.closest('.file-checkbox');
+      if (!checkbox) return;
+      e.stopPropagation();
+      const fileId = checkbox.dataset.id;
+      if (checkbox.checked) {
+        this.selectedFiles.add(fileId);
+        checkbox.closest('.file-item')?.classList.add('selected');
+      } else {
+        this.selectedFiles.delete(fileId);
+        checkbox.closest('.file-item')?.classList.remove('selected');
+      }
+      this.updateBatchActions();
     });
   }
 
@@ -242,92 +243,87 @@ class FileBrowser {
     }
   }
 
-  // Drag to move files
+  // Drag to move files — 事件委托
   bindDragMove() {
+    const fileList = document.getElementById('fileList');
+    if (!fileList || fileList._dragBound) return;
+    fileList._dragBound = true;
+
     let draggedFileIds = [];
 
-    document.querySelectorAll('.file-item-row[draggable="true"]').forEach(item => {
-      item.addEventListener('dragstart', (e) => {
-        // 获取所有被选中的文件
-        const checkedBoxes = document.querySelectorAll('.file-checkbox:checked');
-        if (checkedBoxes.length > 0) {
-          // 移动所有选中的文件
-          draggedFileIds = Array.from(checkedBoxes).map(cb => cb.dataset.id);
-        } else {
-          // 移动当前文件
-          draggedFileIds = [item.dataset.id];
-        }
-        item.classList.add('dragging');
-        e.dataTransfer.effectAllowed = 'move';
-        e.dataTransfer.setData('text/plain', draggedFileIds.join(','));
-      });
+    // 拖拽开始（委托到 fileList）
+    fileList.addEventListener('dragstart', (e) => {
+      const item = e.target.closest('.file-item-row[draggable="true"]');
+      if (!item) return;
+      const checkedBoxes = document.querySelectorAll('.file-checkbox:checked');
+      if (checkedBoxes.length > 0) {
+        draggedFileIds = Array.from(checkedBoxes).map(cb => cb.dataset.id);
+      } else {
+        draggedFileIds = [item.dataset.id];
+      }
+      item.classList.add('dragging');
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', draggedFileIds.join(','));
+    });
 
-      item.addEventListener('dragend', () => {
-        item.classList.remove('dragging');
-        draggedFileIds = [];
-        document.querySelectorAll('.folder-item').forEach(f => {
-          f.classList.remove('drag-over');
-        });
+    // 拖拽结束
+    fileList.addEventListener('dragend', (e) => {
+      const item = e.target.closest('.file-item-row');
+      if (!item) return;
+      item.classList.remove('dragging');
+      draggedFileIds = [];
+      document.querySelectorAll('.folder-item').forEach(f => {
+        f.classList.remove('drag-over');
       });
     });
 
-    document.querySelectorAll('.folder-item[data-droppable="true"]').forEach(folder => {
-      folder.addEventListener('dragover', (e) => {
+    // 文件夹拖入 — 委托到 fileList 容器（包含 sidebarTree 和 folderTree）
+    const dropContainers = [document.getElementById('sidebarTree'), document.getElementById('folderTree')];
+    dropContainers.forEach(container => {
+      if (!container || container._dropBound) return;
+      container._dropBound = true;
+
+      container.addEventListener('dragover', (e) => {
+        const folder = e.target.closest('.folder-item[data-droppable="true"]');
+        if (!folder) return;
         e.preventDefault();
         e.dataTransfer.dropEffect = 'move';
         folder.classList.add('drag-over');
       });
 
-      folder.addEventListener('dragleave', () => {
-        folder.classList.remove('drag-over');
+      container.addEventListener('dragleave', (e) => {
+        const folder = e.target.closest('.folder-item');
+        if (folder) folder.classList.remove('drag-over');
       });
 
-      folder.addEventListener('drop', async (e) => {
+      container.addEventListener('drop', async (e) => {
+        const folder = e.target.closest('.folder-item[data-droppable="true"]');
+        if (!folder) return;
         e.preventDefault();
-        e.stopPropagation(); // 阻止冒泡到文件夹点击事件
+        e.stopPropagation();
         folder.classList.remove('drag-over');
 
-        // 获取拖拽的文件ID列表
         const data = e.dataTransfer.getData('text/plain');
         const fileIds = data ? data.split(',') : draggedFileIds;
+        if (fileIds.length === 0) return;
 
-        if (fileIds.length > 0) {
-          const targetFolderId = folder.dataset.id;
-          try {
-            // 使用批量移动API
-            const res = await fetch('/files/move-batch', {
-              method: 'PATCH',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                fileIds: fileIds,
-                folder: targetFolderId || null
-              })
-            });
-            const result = await res.json();
-            if (result.success) {
-              location.reload();
-            } else {
-              alert(result.message || '移动失败');
-            }
-          } catch (error) {
-            console.error('Move error:', error);
-            alert('移动失败');
-          }
+        const targetFolderId = folder.dataset.id;
+        try {
+          const res = await fetch('/files/move-batch', {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ fileIds, folder: targetFolderId || null })
+          });
+          const result = await res.json();
+          if (result.success) location.reload();
+          else alert(result.message || '移动失败');
+        } catch (err) {
+          console.error('Move error:', err);
+          alert('移动失败');
         }
       });
     });
-
-    // 文件夹点击事件 - 只在非拖拽状态下导航
-    document.querySelectorAll('.folder-item[data-type="folder"]').forEach(folder => {
-      folder.addEventListener('click', (e) => {
-        // 如果正在拖拽，不执行导航
-        if (document.querySelector('.file-item.dragging')) return;
-        const folderId = folder.dataset.id;
-        this.navigateToFolder(folderId);
-      });
-    });
-
-      }
+  }
 
   // Modals
   initModals() {
@@ -354,8 +350,25 @@ class FileBrowser {
       });
     });
 
-    // Load folder tree
-    this.loadFolderTree();
+    // 移动弹窗的文件夹树复用 sidebar 树（避免重复 fetch /folders）
+    // 委托到 #folderTree 单次绑定 + 重用同一份数据缓存
+    this.initMoveModalTree();
+  }
+
+  initMoveModalTree() {
+    const tree = document.getElementById('folderTree');
+    if (!tree || tree._bound) return;
+    tree._bound = true;
+
+    // 委托：点击文件夹选中
+    tree.addEventListener('click', (e) => {
+      const item = e.target.closest('.folder-item');
+      if (item && item.dataset.selectable !== undefined) {
+        document.querySelectorAll('#folderTree .folder-item').forEach(f => f.classList.remove('selected'));
+        item.classList.add('selected');
+        this.selectedFolderItem = item;
+      }
+    });
   }
 
   selectFolderItem(item) {
@@ -364,97 +377,61 @@ class FileBrowser {
     this.selectedFolderItem = item;
   }
 
-  async loadFolderTree() {
-    try {
-      const res = await fetch('/folders', {
-        headers: { 'Accept': 'application/json' }
-      });
-      const folders = await res.json();
+  /**
+   * 用缓存的数据填充文件夹树（避免重复请求 /folders）
+   * 第一次调用时 fetch，后续调用直接用 _cachedFolders
+   */
+  async ensureFolderTreeData() {
+    if (this._cachedFolders) return this._cachedFolders;
+    const res = await fetch('/folders', { headers: { 'Accept': 'application/json' } });
+    const data = await res.json();
+    this._cachedFolders = data.data || [];
+    return this._cachedFolders;
+  }
 
-      const treeContainer = document.getElementById('folderTree');
-      if (!treeContainer || !folders || !folders.data) return;
+  async populateFolderTree() {
+    const tree = document.getElementById('folderTree');
+    if (!tree) return;
+    const folders = await this.ensureFolderTreeData();
+    if (!folders) return;
 
-      // Clear existing items except root
-      treeContainer.innerHTML = `
-        <div class="folder-item root selected" data-id="" data-selectable="true">
-          <span class="folder-icon">&#128193;</span>
-          <span class="folder-name">全部文件</span>
-        </div>
-      `;
+    tree.innerHTML = '';
+    const root = document.createElement('div');
+    root.className = 'folder-item root selected';
+    root.dataset.id = '';
+    root.dataset.selectable = 'true';
+    root.innerHTML = '<span class="folder-icon">📁</span><span class="folder-name">全部文件</span>';
+    tree.appendChild(root);
 
-      // Add folders as tree structure
-      // Build tree structure
-      const folderMap = {};
-      const rootFolders = [];
+    // 构建树结构
+    const folderMap = {};
+    const rootFolders = [];
+    folders.forEach(f => { folderMap[f._id] = { ...f, children: [] }; });
+    folders.forEach(f => {
+      if (f.parent && folderMap[f.parent]) {
+        folderMap[f.parent].children.push(folderMap[f._id]);
+      } else {
+        rootFolders.push(folderMap[f._id]);
+      }
+    });
 
-      folders.data.forEach(folder => {
-        folderMap[folder._id] = { ...folder, children: [] };
-      });
-
-      folders.data.forEach(folder => {
-        if (folder.parent) {
-          const parent = folderMap[folder.parent];
-          if (parent) {
-            parent.children.push(folderMap[folder._id]);
-          } else {
-            rootFolders.push(folderMap[folder._id]);
-          }
-        } else {
-          rootFolders.push(folderMap[folder._id]);
-        }
-      });
-
-      // Render tree recursively
-      const renderNode = (node) => {
-        const item = document.createElement('div');
-        item.className = 'folder-item child';
-        item.dataset.id = node._id;
-        item.dataset.selectable = 'true';
-        item.style.setProperty('padding-left', `${32 + (node.depth || 0) * 20}px`, 'important');
-        item.innerHTML = `
-          <span class="folder-icon">&#128194;</span>
-          <span class="folder-name">${node.name}</span>
-        `;
-        return item;
-      };
-
-      const renderTree = (nodes, container) => {
-        nodes.forEach(node => {
-          const item = renderNode(node);
-          item.addEventListener('click', (e) => {
-            e.stopPropagation();
-            this.selectFolderItem(item);
-          });
-          container.appendChild(item);
-          if (node.children?.length > 0) {
-            renderTree(node.children, container);
-          }
-        });
-      };
-
-      renderTree(rootFolders, treeContainer);
-
-      // Add click handler for root
-      const rootItem = treeContainer.querySelector('.folder-item.root');
-      rootItem?.addEventListener('click', (e) => {
-        e.stopPropagation();
-        this.selectFolderItem(rootItem);
-      });
-
-      treeContainer.addEventListener('click', (e) => {
-        const item = e.target.closest('.folder-item');
-        if (item && item.dataset.selectable) {
-          e.stopPropagation();
-          this.selectFolderItem(item);
-        }
-      });
-
-    } catch (error) {
-      console.error('Load folder tree error:', error);
-    }
+    const renderNode = (node, depth) => {
+      const item = document.createElement('div');
+      item.className = 'folder-item child';
+      item.dataset.id = node._id;
+      item.dataset.selectable = 'true';
+      item.style.paddingLeft = (14 + depth * 16) + 'px';
+      item.innerHTML = '<span class="folder-icon">📂</span><span class="folder-name">' + node.name + '</span>';
+      tree.appendChild(item);
+      if (node.children?.length > 0) {
+        node.children.forEach(c => renderNode(c, depth + 1));
+      }
+    };
+    rootFolders.forEach(n => renderNode(n, 1));
   }
 
   showMoveModal() {
+    this.populateFolderTree();
     document.getElementById('moveModal')?.classList.add('show');
   }
 
@@ -646,44 +623,108 @@ class FileBrowser {
   initImagePreview() {
     const modal = document.getElementById('imagePreviewModal');
     const previewImg = document.getElementById('previewImg');
-    const closeBtn = document.querySelector('.modal-close');
-    const previewFileName = document.getElementById('previewFileName');
-    const downloadBtn = document.getElementById('previewDownloadBtn');
+    const closeBtn = document.getElementById('imagePreviewModal')?.querySelector('.modal-close');
 
     if (!modal) return;
 
-    // 排除视频缩略图容器（视频由 initVideoPlayer 处理）
-    document.querySelectorAll('.file-thumb-container:not([data-type="video"])').forEach(container => {
-      container.addEventListener('click', () => {
-        const fullUrl = container.dataset.fullUrl;
-        const fileId = container.closest('.file-item')?.dataset.id;
-        const fileName = container.closest('.file-item')?.querySelector('.file-name')?.textContent;
+    // 委托：缩略图点击 → 打开完整预览
+    const fileList = document.getElementById('fileList');
+    if (fileList && !fileList._imagePreviewBound) {
+      fileList.addEventListener('click', (e) => {
+        const container = e.target.closest('.file-thumb-container:not([data-type="video"])');
+        if (!container) return;
+        const fileItem = container.closest('.file-item');
+        const fileId = fileItem?.dataset.id;
+        if (fileId) openPreview(fileId);
+      });
+      fileList._imagePreviewBound = true;
+    }
 
-        if (fullUrl && previewImg) {
-          previewImg.src = fullUrl;
-          previewImg.dataset.fileId = fileId;
-          if (previewFileName) previewFileName.textContent = fileName || '';
-          if (downloadBtn) downloadBtn.href = `/files/${fileId}/download`;
-          modal.classList.add('show');
+    // 单次绑定关闭按钮
+    if (!modal._closeBound) {
+      closeBtn?.addEventListener('click', () => closePreview());
+      modal.addEventListener('click', (e) => {
+        if (e.target === modal) closePreview();
+      });
+      document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && modal.classList.contains('show')) closePreview();
+      });
+
+      // 全屏按钮
+      const fsBtn = document.getElementById('previewFullscreenBtn');
+      fsBtn?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (previewImg && previewImg.src) {
+          window.__lightbox?.open(previewImg.src);
         }
       });
-    });
 
-    closeBtn?.addEventListener('click', () => {
-      modal.classList.remove('show');
-    });
+      // AI 字段自动保存（失焦或 change）
+      const catSelect = document.getElementById('previewCategorySelect');
+      catSelect?.addEventListener('change', () => saveAiAnalysis({ category: catSelect.value }));
 
-    modal.addEventListener('click', (e) => {
-      if (e.target === modal) {
-        modal.classList.remove('show');
-      }
-    });
+      const summaryInput = document.getElementById('previewSummaryInput');
+      summaryInput?.addEventListener('blur', () => {
+        const current = modal._previewData?.aiAnalysis?.summary || '';
+        if (summaryInput.value !== current) {
+          saveAiAnalysis({ summary: summaryInput.value });
+        }
+      });
+      summaryInput?.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') { e.preventDefault(); summaryInput.blur(); }
+      });
 
-    document.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape' && modal.classList.contains('show')) {
-        modal.classList.remove('show');
-      }
-    });
+      // 标签添加
+      const tagAddBtn = document.getElementById('previewTagAddBtn');
+      const tagInput = document.getElementById('previewTagInput');
+      const addTag = () => {
+        const val = tagInput?.value?.trim();
+        if (!val || !modal._previewData) return;
+        const labels = (modal._previewData.aiAnalysis?.labels || []).slice();
+        if (!labels.includes(val) && labels.length < 20) {
+          labels.push(val);
+          saveAiAnalysis({ labels });
+        }
+        if (tagInput) tagInput.value = '';
+      };
+      tagAddBtn?.addEventListener('click', addTag);
+      tagInput?.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') { e.preventDefault(); addTag(); }
+      });
+
+      // 标签删除（委托）
+      const tagsEl = document.getElementById('previewTags');
+      tagsEl?.addEventListener('click', (e) => {
+        const removeBtn = e.target.closest('.preview-tag-remove');
+        if (!removeBtn) return;
+        const idx = parseInt(removeBtn.dataset.idx, 10);
+        if (isNaN(idx)) return;
+        const labels = (modal._previewData?.aiAnalysis?.labels || []).slice();
+        labels.splice(idx, 1);
+        saveAiAnalysis({ labels });
+      });
+
+      // 删除按钮
+      const deleteBtn = document.getElementById('previewDeleteBtn');
+      deleteBtn?.addEventListener('click', () => deleteCurrentFile());
+
+      // 路径编辑按钮
+      const folderEditBtn = document.getElementById('previewFolderEditBtn');
+      folderEditBtn?.addEventListener('click', () => openFolderPicker());
+
+      // 文件夹选择器弹窗
+      const picker = document.getElementById('previewFolderPicker');
+      document.getElementById('closePreviewFolderPicker')?.addEventListener('click', closeFolderPicker);
+      document.getElementById('cancelPreviewFolderBtn')?.addEventListener('click', closeFolderPicker);
+      document.getElementById('confirmPreviewFolderBtn')?.addEventListener('click', confirmFolderChange);
+      picker?.addEventListener('click', (e) => { if (e.target === picker) closeFolderPicker(); });
+
+      // AI 重新分析
+      const reanBtn = document.getElementById('previewReanalyzeBtn');
+      reanBtn?.addEventListener('click', () => reanalyzeCurrentFile());
+
+      modal._closeBound = true;
+    }
   }
 
   initVideoPlayer() {
@@ -695,15 +736,17 @@ class FileBrowser {
 
     if (!modal || !videoPlayer) return;
 
-    // 视频缩略图点击 → 打开播放器
-    document.querySelectorAll('.file-thumb-container[data-type="video"]').forEach(container => {
-      container.addEventListener('click', (e) => {
+    // 事件委托：视频缩略图点击统一处理
+    const fileList = document.getElementById('fileList');
+    if (fileList && !fileList._videoPlayerBound) {
+      fileList.addEventListener('click', (e) => {
+        const container = e.target.closest('.file-thumb-container[data-type=\"video\"]');
+        if (!container) return;
         e.stopPropagation();
         const streamUrl = container.dataset.fullUrl;
         const fileItem = container.closest('.file-item');
         const fileId = fileItem?.dataset.id;
         const fileName = fileItem?.querySelector('.file-name')?.textContent;
-
         if (streamUrl) {
           videoPlayer.src = streamUrl;
           if (videoFileName) videoFileName.textContent = fileName || '';
@@ -712,32 +755,31 @@ class FileBrowser {
           videoPlayer.play().catch(() => {});
         }
       });
-    });
+      fileList._videoPlayerBound = true;
+    }
 
-    // 关闭按钮
-    closeBtn?.addEventListener('click', () => {
-      videoPlayer.pause();
-      videoPlayer.src = '';
-      modal.classList.remove('show');
-    });
-
-    // 点击背景关闭
-    modal.addEventListener('click', (e) => {
-      if (e.target === modal) {
+    if (!modal._closeBound) {
+      closeBtn?.addEventListener('click', () => {
         videoPlayer.pause();
         videoPlayer.src = '';
         modal.classList.remove('show');
-      }
-    });
-
-    // ESC 关闭
-    document.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape' && modal.classList.contains('show')) {
-        videoPlayer.pause();
-        videoPlayer.src = '';
-        modal.classList.remove('show');
-      }
-    });
+      });
+      modal.addEventListener('click', (e) => {
+        if (e.target === modal) {
+          videoPlayer.pause();
+          videoPlayer.src = '';
+          modal.classList.remove('show');
+        }
+      });
+      document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && modal.classList.contains('show')) {
+          videoPlayer.pause();
+          videoPlayer.src = '';
+          modal.classList.remove('show');
+        }
+      });
+      modal._closeBound = true;
+    }
   }
 
   async copyToClipboard(text) {
@@ -785,7 +827,7 @@ class FileBrowser {
     const fileList = document.getElementById('fileList');
     if (!fileList) return;
     if (!keyword) {
-      if (this._originalList) { fileList.innerHTML = this._originalList; this._originalList = null; this.rebindFileActions(); }
+      if (this._originalList) { fileList.innerHTML = this._originalList; this._originalList = null; }
       return;
     }
     if (!this._originalList) this._originalList = fileList.innerHTML;
@@ -815,15 +857,7 @@ class FileBrowser {
           '<div class="file-actions"><a href="/files/' + f.id + '/download" class="action-btn download"><svg viewBox="0 0 24 24"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg></a></div></div>';
       });
       fileList.innerHTML = html;
-      this.rebindFileActions();
     } catch (e) { console.error('Search error:', e); }
-  }
-
-  rebindFileActions() {
-    this.initImagePreview();
-    this.initVideoPlayer();
-    this.bindSelectionEvents();
-    this.bindDragMove();
   }
 
   // --- 最近上传点击 ---
@@ -859,14 +893,168 @@ class FileBrowser {
     document.getElementById('sidebarToggle')?.addEventListener('click', () => {
       document.getElementById('sidebar')?.classList.toggle('collapsed');
     });
+    this.initFolderContextMenu();
+    this.initMergeFolder();
+  }
+
+  initFolderContextMenu() {
+    const tree = document.getElementById('sidebarTree');
+    const menu = document.getElementById('folderContextMenu');
+    if (!tree || !menu || tree._ctxBound) return;
+    tree._ctxBound = true;
+    tree.addEventListener('contextmenu', (e) => {
+      const item = e.target.closest('.folder-item');
+      if (!item) return;
+      const folderId = item.dataset.id;
+      if (!folderId) return;
+      e.preventDefault();
+      this._ctxTargetId = folderId;
+      this._ctxTargetName = item.querySelector('.folder-name')?.textContent || '';
+      menu.style.left = e.clientX + 'px';
+      menu.style.top = e.clientY + 'px';
+      menu.style.display = 'block';
+      requestAnimationFrame(() => {
+        const rect = menu.getBoundingClientRect();
+        if (rect.right > window.innerWidth) menu.style.left = (e.clientX - rect.width) + 'px';
+        if (rect.bottom > window.innerHeight) menu.style.top = (e.clientY - rect.height) + 'px';
+      });
+    });
+    menu.addEventListener('click', (e) => {
+      const item = e.target.closest('.context-menu-item');
+      if (!item) return;
+      const action = item.dataset.action;
+      console.log('[ctx click]', action);
+      const targetId = this._ctxTargetId;
+      const targetName = this._ctxTargetName;
+      menu.style.display = 'none';
+      if (action === 'rename' && targetId) this.showRenameModal('folder', targetId, targetName);
+      else if (action === 'delete' && targetId) this.deleteFolder(targetId);
+      else if (action === 'merge' && targetId) this.openMergeFolderModal(targetId, targetName);
+    });
+    document.addEventListener('click', (e) => {
+      if (!menu.contains(e.target)) menu.style.display = 'none';
+    });
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && menu.style.display !== 'none') menu.style.display = 'none';
+    });
+  }
+
+  initMergeFolder() {
+    const modal = document.getElementById('mergeFolderModal');
+    if (!modal) return;
+    document.getElementById('closeMergeFolderModal')?.addEventListener('click', () => this.closeMergeFolderModal());
+    document.getElementById('cancelMergeFolderBtn')?.addEventListener('click', () => this.closeMergeFolderModal());
+    document.getElementById('confirmMergeFolderBtn')?.addEventListener('click', () => this.confirmMergeFolder());
+    modal.addEventListener('click', (e) => {
+      if (e.target === modal) this.closeMergeFolderModal();
+    });
+  }
+
+  async openMergeFolderModal(sourceId, sourceName) {
+    console.log('[merge] called', sourceId, sourceName);
+    const modal = document.getElementById('mergeFolderModal');
+    if (!modal) return;
+    this._mergeSourceId = sourceId;
+    this._mergeSourceName = sourceName;
+    this._mergeTargetId = null;
+    document.getElementById('mergeFolderTitle').textContent = '把 "' + sourceName + '" 合并到：';
+    document.getElementById('mergeInfo').innerHTML = '<strong>提示</strong>：所有文件将移到目标文件夹，源文件夹会被删除。';
+    document.getElementById('mergeTargetList').innerHTML = '<div class="merge-loading">加载中...</div>';
+    document.getElementById('confirmMergeFolderBtn').disabled = true;
+    modal.classList.add('show');
+    try {
+      const res = await fetch('/folders', { headers: { 'Accept': 'application/json' } });
+      const data = await res.json();
+      const folders = (data.data || []).filter(f => f._id !== sourceId && !f.isDeleted);
+      if (folders.length === 0) {
+        document.getElementById('mergeTargetList').innerHTML = '<div class="merge-empty">没有可选目标文件夹</div>';
+        return;
+      }
+      const list = document.getElementById('mergeTargetList');
+      list.innerHTML = '';
+      folders.forEach(f => {
+        const item = document.createElement('div');
+        item.className = 'merge-target-item';
+        item.dataset.id = f._id;
+        // 根级目录 path 是 "/"（无意义），显示 name；其他显示完整路径
+        const isRoot = !f.parent || f.depth === 0;
+        const label = isRoot ? '/' + f.name : '/' + (f.path || f.name);
+        item.innerHTML = '<span class="merge-target-radio"></span>' +
+          '<span class="merge-target-icon">📁</span>' +
+          '<span class="merge-target-path">' + label + '</span>';
+        item.addEventListener('click', () => {
+          list.querySelectorAll('.merge-target-item').forEach(x => x.classList.remove('selected'));
+          item.classList.add('selected');
+          this._mergeTargetId = f._id;
+          document.getElementById('confirmMergeFolderBtn').disabled = false;
+        });
+        list.appendChild(item);
+      });
+    } catch (err) {
+      console.error('Load folders error:', err);
+      document.getElementById('mergeTargetList').innerHTML = '<div class="merge-empty">加载失败</div>';
+    }
+  }
+
+  closeMergeFolderModal() {
+    const modal = document.getElementById('mergeFolderModal');
+    if (modal) modal.classList.remove('show');
+    this._mergeSourceId = null;
+    this._mergeTargetId = null;
+  }
+
+  async confirmMergeFolder() {
+    const sourceId = this._mergeSourceId;
+    const targetId = this._mergeTargetId;
+    if (!sourceId || !targetId) return;
+    if (sourceId === targetId) { alert('源和目标不能相同'); return; }
+    const btn = document.getElementById('confirmMergeFolderBtn');
+    btn.disabled = true;
+    btn.textContent = '合并中...';
+    try {
+      const res = await fetch('/folders/' + sourceId + '/merge-into', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ targetFolderId: targetId })
+      });
+      const data = await res.json();
+      if (data.success) {
+        this.closeMergeFolderModal();
+        this.loadSidebarTree();
+        this.refresh();
+        alert('合并成功！移动了 ' + data.movedFiles + ' 个文件，删除了源文件夹 "' + data.deletedFolder + '"');
+      } else {
+        alert('合并失败：' + (data.message || ''));
+        btn.disabled = false;
+        btn.textContent = '确定';
+      }
+    } catch (e) {
+      console.error('confirmMergeFolder error:', e);
+      alert('合并失败');
+      btn.disabled = false;
+      btn.textContent = '确定';
+    }
   }
 
   async loadSidebarTree() {
     try {
-      const res = await fetch('/folders', { headers: { 'Accept': 'application/json' } });
-      const folders = await res.json();
       const tree = document.getElementById('sidebarTree');
-      if (!tree || !folders || !folders.data) return;
+      if (!tree) return;
+      // 委托点击：单次绑定
+      if (!tree._sidebarClickBound) {
+        tree._sidebarClickBound = true;
+        tree.addEventListener('click', (e) => {
+          const item = e.target.closest('.folder-item');
+          if (!item) return;
+          const id = item.dataset.id;
+          if (id !== undefined && !e.target.closest('.action-btn')) {
+            this.navigateToFolder(id);
+          }
+        });
+      }
+      // 复用 /folders 缓存（避免重复请求）
+      const folders = await this.ensureFolderTreeData();
+      if (!folders) return;
 
       // 清空并重建
       tree.innerHTML = '';
@@ -874,17 +1062,14 @@ class FileBrowser {
       root.className = 'folder-item root';
       root.dataset.id = '';
       root.innerHTML = '<span class="folder-icon">📂</span><span class="folder-name">全部文件</span>';
-      root.addEventListener('click', () => this.navigateToFolder(''));
       if (!this.currentFolder) root.classList.add('selected');
       tree.appendChild(root);
 
       // 构建树
       const folderMap = {};
       const rootFolders = [];
-      folders.data.forEach(f => {
-        folderMap[f._id] = { ...f, children: [] };
-      });
-      folders.data.forEach(f => {
+      folders.forEach(f => { folderMap[f._id] = { ...f, children: [] }; });
+      folders.forEach(f => {
         if (f.parent && folderMap[f.parent]) {
           folderMap[f.parent].children.push(folderMap[f._id]);
         } else {
@@ -898,7 +1083,6 @@ class FileBrowser {
         item.dataset.id = node._id;
         item.style.paddingLeft = (14 + depth * 16) + 'px';
         item.innerHTML = '<span class="folder-icon">📁</span><span class="folder-name">' + node.name + '</span>';
-        item.addEventListener('click', (e) => { e.stopPropagation(); this.navigateToFolder(node._id); });
         if (node._id === this.currentFolder) item.classList.add('selected');
         tree.appendChild(item);
         if (node.children?.length > 0) {
@@ -963,6 +1147,7 @@ class FileBrowser {
   }
 
   // 轮询 AI 分析状态，更新 pending 文件卡片
+  // 错开并发：每个文件间隔 150ms 启动请求，避免瞬间冲击后端
   async pollAiStatus() {
     const pendingItems = document.querySelectorAll('.file-item-row[data-ai-pending="true"]');
     if (pendingItems.length === 0) return;
@@ -991,12 +1176,20 @@ class FileBrowser {
       } catch (e) { /* retry next poll */ }
     };
 
-    await Promise.all([...pendingItems].map(checkOne));
+    // 错开请求：每个间隔 150ms 启动一次
+    const items = [...pendingItems];
+    items.forEach((item, i) => {
+      setTimeout(() => checkOne(item), i * 150);
+    });
 
-    const remaining = document.querySelectorAll('.file-item-row[data-ai-pending="true"]').length;
-    if (remaining > 0) {
-      setTimeout(() => this.pollAiStatus(), 3000);
-    }
+    // 等待所有请求完成后再判断是否继续轮询
+    const totalWait = items.length * 150 + 2000;
+    setTimeout(() => {
+      const remaining = document.querySelectorAll('.file-item-row[data-ai-pending="true"]').length;
+      if (remaining > 0) {
+        setTimeout(() => this.pollAiStatus(), 3000);
+      }
+    }, totalWait);
   }
 
   navigateToFolder(folderId) {
@@ -1129,6 +1322,7 @@ class FileBrowser {
           successCount++;
           if (status) { status.textContent = '✓'; status.className = 'upload-file-status success'; }
           if (data.files) results.push(...data.files);
+          // 委托后无需重新绑定事件
         } else {
           failCount++;
           if (status) { status.textContent = '✗ ' + ((data && data.message) || '失败'); status.className = 'upload-file-status error'; }
@@ -1215,4 +1409,654 @@ function getFileExt(filename) {
 function getFileNameWithoutExt(filename) {
   const lastDot = filename.lastIndexOf('.');
   return lastDot > 0 ? filename.substring(0, lastDot) : filename;
+}
+
+function formatDate(date) {
+  if (!date) return '—';
+  const d = new Date(date);
+  if (isNaN(d)) return '—';
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  const h = String(d.getHours()).padStart(2, '0');
+  const min = String(d.getMinutes()).padStart(2, '0');
+  return `${y}/${m}/${day} ${h}:${min}`;
+}
+/**
+ * 全屏图片查看器（Lightbox）
+ * - 缩放 25%-400% 8 档
+ * - 鼠标拖拽平移（边界限制）
+ * - 滚轮缩放
+ * - 90° 旋转
+ * - 双击重置
+ * - ESC 关闭
+ */
+class Lightbox {
+  constructor() {
+    this.overlay = document.getElementById('lightboxOverlay');
+    this.img = document.getElementById('lightboxImg');
+    this.zoomSelect = document.getElementById('lbZoomSelect');
+    this.btnOut = document.getElementById('lbZoomOut');
+    this.btnIn = document.getElementById('lbZoomIn');
+    this.btnRotate = document.getElementById('lbRotate');
+    this.btnClose = document.getElementById('lbClose');
+
+    this.zoomLevels = [0.25, 0.5, 0.75, 1, 1.5, 2, 3, 4];
+    this.scale = 1;
+    this.rotation = 0;
+    this.translateX = 0;
+    this.translateY = 0;
+    this.isDragging = false;
+    this.dragStartX = 0;
+    this.dragStartY = 0;
+    this.dragStartTX = 0;
+    this.dragStartTY = 0;
+    this.naturalWidth = 0;
+    this.naturalHeight = 0;
+
+    if (!this.overlay || !this.img) return;
+    this.bindEvents();
+  }
+
+  bindEvents() {
+    this.btnIn?.addEventListener('click', () => this.zoomStep(1));
+    this.btnOut?.addEventListener('click', () => this.zoomStep(-1));
+    this.btnRotate?.addEventListener('click', () => this.rotate());
+    this.btnClose?.addEventListener('click', () => this.close());
+    this.zoomSelect?.addEventListener('change', (e) => {
+      this.setZoom(parseFloat(e.target.value));
+    });
+
+    this.overlay.addEventListener('click', (e) => {
+      // 点击遮罩关闭（非图片本身）
+      if (e.target === this.overlay) this.close();
+    });
+
+    this.img.addEventListener('mousedown', (e) => this.startDrag(e));
+    document.addEventListener('mousemove', (e) => this.onDrag(e));
+    document.addEventListener('mouseup', () => this.endDrag());
+
+    // 滚轮缩放
+    this.overlay.addEventListener('wheel', (e) => {
+      e.preventDefault();
+      this.zoomStep(e.deltaY < 0 ? 1 : -1);
+    }, { passive: false });
+
+    // 双击重置
+    this.img.addEventListener('dblclick', () => this.reset());
+
+    // 触摸支持
+    this.img.addEventListener('touchstart', (e) => {
+      if (e.touches.length === 1) {
+        const t = e.touches[0];
+        this.startDrag({ clientX: t.clientX, clientY: t.clientY });
+      }
+    }, { passive: true });
+    document.addEventListener('touchmove', (e) => {
+      if (this.isDragging && e.touches.length === 1) {
+        const t = e.touches[0];
+        this.onDrag({ clientX: t.clientX, clientY: t.clientY });
+      }
+    }, { passive: true });
+    document.addEventListener('touchend', () => this.endDrag());
+
+    // ESC 关闭
+    document.addEventListener('keydown', (e) => {
+      if (this.overlay.style.display === 'none' || this.overlay.style.display === '') return;
+      if (e.key === 'Escape') this.close();
+      else if (e.key === '+' || e.key === '=') this.zoomStep(1);
+      else if (e.key === '-' || e.key === '_') this.zoomStep(-1);
+      else if (e.key === 'r' || e.key === 'R') this.rotate();
+      else if (e.key === '0') this.reset();
+    });
+  }
+
+  open(src) {
+    if (!this.overlay || !this.img) return;
+    this.img.src = src;
+    this.img.onload = () => {
+      this.naturalWidth = this.img.naturalWidth;
+      this.naturalHeight = this.img.naturalHeight;
+    };
+    this.scale = 1;
+    this.rotation = 0;
+    this.translateX = 0;
+    this.translateY = 0;
+    this.zoomSelect.value = '1';
+    this.applyTransform();
+    this.updateButtons();
+    this.overlay.style.display = 'flex';
+  }
+
+  close() {
+    if (!this.overlay) return;
+    this.overlay.style.display = 'none';
+    this.img.src = '';
+  }
+
+  setZoom(value) {
+    // 找最接近的档位
+    let closest = this.zoomLevels[0];
+    let minDiff = Math.abs(value - closest);
+    for (const lvl of this.zoomLevels) {
+      const diff = Math.abs(value - lvl);
+      if (diff < minDiff) { minDiff = diff; closest = lvl; }
+    }
+    this.scale = closest;
+    this.zoomSelect.value = String(this.scale);
+    this.clampTranslate();
+    this.applyTransform();
+    this.updateButtons();
+  }
+
+  zoomStep(direction) {
+    const currentIdx = this.zoomLevels.indexOf(this.scale);
+    const newIdx = Math.max(0, Math.min(this.zoomLevels.length - 1, currentIdx + direction));
+    if (newIdx === currentIdx) return;
+    this.setZoom(this.zoomLevels[newIdx]);
+  }
+
+  rotate() {
+    this.rotation = (this.rotation + 90) % 360;
+    this.applyTransform();
+  }
+
+  reset() {
+    this.scale = 1;
+    this.rotation = 0;
+    this.translateX = 0;
+    this.translateY = 0;
+    this.zoomSelect.value = '1';
+    this.applyTransform();
+    this.updateButtons();
+  }
+
+  startDrag(e) {
+    if (this.scale <= 1) return; // 100% 时不拖
+    this.isDragging = true;
+    this.dragStartX = e.clientX;
+    this.dragStartY = e.clientY;
+    this.dragStartTX = this.translateX;
+    this.dragStartTY = this.translateY;
+    this.img.classList.add('dragging');
+  }
+
+  onDrag(e) {
+    if (!this.isDragging) return;
+    this.translateX = this.dragStartTX + (e.clientX - this.dragStartX);
+    this.translateY = this.dragStartTY + (e.clientY - this.dragStartY);
+    this.applyTransform();
+  }
+
+  endDrag() {
+    if (!this.isDragging) return;
+    this.isDragging = false;
+    this.img.classList.remove('dragging');
+    this.clampTranslate();
+    this.applyTransform();
+  }
+
+  // 平移边界限制：图片不超出视口中心
+  clampTranslate() {
+    if (this.scale <= 1) {
+      this.translateX = 0;
+      this.translateY = 0;
+      return;
+    }
+    // 旋转后尺寸会变：用 cssTransform 后再算
+    // 简化：直接用自然宽高 + scale 估算
+    const rot = this.rotation % 180 !== 0; // 90 / 270 时尺寸互换
+    const w = rot ? this.naturalHeight : this.naturalWidth;
+    const h = rot ? this.naturalWidth : this.naturalHeight;
+    if (!w || !h) return;
+
+    // 图片以 object-fit: contain 显示，实际显示尺寸按比例缩放进视口
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    const containScale = Math.min(vw / w, vh / h);
+    const displayW = w * containScale;
+    const displayH = h * containScale;
+    const scaledW = displayW * this.scale;
+    const scaledH = displayH * this.scale;
+    const maxX = Math.max(0, (scaledW - vw) / 2);
+    const maxY = Math.max(0, (scaledH - vh) / 2);
+    this.translateX = Math.max(-maxX, Math.min(maxX, this.translateX));
+    this.translateY = Math.max(-maxY, Math.min(maxY, this.translateY));
+  }
+
+  applyTransform() {
+    if (!this.img) return;
+    this.img.style.transform = `translate(${this.translateX}px, ${this.translateY}px) scale(${this.scale}) rotate(${this.rotation}deg)`;
+  }
+
+  updateButtons() {
+    if (this.btnOut) this.btnOut.disabled = this.scale === this.zoomLevels[0];
+    if (this.btnIn) this.btnIn.disabled = this.scale === this.zoomLevels[this.zoomLevels.length - 1];
+  }
+}
+
+// ============= 预览辅助函数 =============
+
+async function openPreview(fileId) {
+  const modal = document.getElementById('imagePreviewModal');
+  if (!modal) return;
+
+  modal._previewData = null;
+  modal.classList.add('show');
+
+  // 显示 loading
+  const loading = document.getElementById('previewLoading');
+  if (loading) loading.classList.add('show');
+  const img = document.getElementById('previewImg');
+  if (img) img.style.opacity = '0.3';
+
+  try {
+    const res = await fetch('/files/' + fileId + '/info');
+    const data = await res.json();
+    if (!data.success) {
+      closePreview();
+      alert('文件信息加载失败');
+      return;
+    }
+
+    const file = data.file;
+    modal._previewData = file;
+
+    // 大图
+    const previewImg = document.getElementById('previewImg');
+    if (previewImg) {
+      previewImg.src = '/files/' + fileId + '/preview';
+      previewImg.style.opacity = '1';
+      previewImg.onload = () => {
+        if (loading) loading.classList.remove('show');
+      };
+      previewImg.onerror = () => {
+        if (loading) loading.classList.remove('show');
+      };
+    }
+
+    // 文件名
+    const nameEl = document.getElementById('previewFileName');
+    if (nameEl) nameEl.textContent = file.name || '—';
+
+    // 下载
+    const dl = document.getElementById('previewDownloadBtn');
+    if (dl) dl.href = '/files/' + fileId + '/download';
+
+    // 位置
+    const pathEl = document.getElementById('previewFolderPath');
+    if (pathEl) pathEl.textContent = file.folderPath ? '/' + file.folderPath : '根目录';
+
+    // 重置重新分析按钮状态
+    const reanBtn = document.getElementById('previewReanalyzeBtn');
+    if (reanBtn) {
+      reanBtn.disabled = false;
+      reanBtn.querySelector('span').textContent = '重新分析';
+    }
+
+    // AI 字段
+    const ai = file.aiAnalysis || {};
+    const catSel = document.getElementById('previewCategorySelect');
+    if (catSel) catSel.value = ai.category || '其他';
+
+    const sumIn = document.getElementById('previewSummaryInput');
+    if (sumIn) sumIn.value = ai.summary || '';
+
+    // 保存 folder 原始 id（从后端 getFileInfo 加进来）
+    modal._previewData.folderId = file.folderId || file.folder || null;
+    modal._previewData._rawFolderId = file.folderId || file.folder || '';
+
+    // 元信息
+    const sizeEl = document.getElementById('previewSize');
+    if (sizeEl) sizeEl.textContent = formatSize(file.size);
+    const typeEl = document.getElementById('previewType');
+    if (typeEl) typeEl.textContent = file.type || file.extension || '—';
+    const createdEl = document.getElementById('previewCreated');
+    if (createdEl) createdEl.textContent = formatDate(file.createdAt);
+
+    // 标签
+    renderPreviewTags(ai.labels || []);
+  } catch (err) {
+    console.error('openPreview error:', err);
+    closePreview();
+  }
+}
+
+function closePreview() {
+  const modal = document.getElementById('imagePreviewModal');
+  if (!modal) return;
+  modal.classList.remove('show');
+  modal._previewData = null;
+  const img = document.getElementById('previewImg');
+  if (img) {
+    img.src = '';
+    img.style.opacity = '1';
+  }
+  const loading = document.getElementById('previewLoading');
+  if (loading) loading.classList.remove('show');
+  // 清空保存提示
+  ['previewCategorySave', 'previewSummarySave', 'previewTagsSave'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) { el.classList.remove('show'); el.textContent = ''; }
+  });
+}
+
+function renderPreviewTags(labels) {
+  const container = document.getElementById('previewTags');
+  if (!container) return;
+  container.innerHTML = '';
+  labels.forEach((label, idx) => {
+    const tag = document.createElement('span');
+    tag.className = 'preview-tag';
+    const textNode = document.createTextNode(label);
+    tag.appendChild(textNode);
+    const removeBtn = document.createElement('button');
+    removeBtn.className = 'preview-tag-remove';
+    removeBtn.dataset.idx = String(idx);
+    removeBtn.textContent = '×';
+    tag.appendChild(removeBtn);
+    container.appendChild(tag);
+  });
+}
+
+function showSaveHint(elemId, ok, msg) {
+  const el = document.getElementById(elemId);
+  if (!el) return;
+  el.textContent = msg || (ok ? '✓ 已保存' : '保存失败');
+  el.classList.remove('error');
+  if (!ok) el.classList.add('error');
+  el.classList.add('show');
+  clearTimeout(el._timer);
+  el._timer = setTimeout(() => el.classList.remove('show'), 2000);
+}
+
+async function saveAiAnalysis(patch) {
+  const modal = document.getElementById('imagePreviewModal');
+  if (!modal || !modal._previewData) return;
+  const fileId = modal._previewData.id;
+
+  try {
+    const res = await fetch('/files/' + fileId + '/ai-analysis', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(patch)
+    });
+    const data = await res.json();
+    if (data.success) {
+      // 更新本地缓存
+      if (!modal._previewData.aiAnalysis) modal._previewData.aiAnalysis = {};
+      Object.assign(modal._previewData.aiAnalysis, data.aiAnalysis);
+      // 显示提示
+      if ('category' in patch) showSaveHint('previewCategorySave', true);
+      if ('summary' in patch) showSaveHint('previewSummarySave', true);
+      if ('labels' in patch) {
+        renderPreviewTags(data.aiAnalysis.labels || []);
+        showSaveHint('previewTagsSave', true);
+      }
+    } else {
+      const hintId = 'category' in patch ? 'previewCategorySave'
+        : 'summary' in patch ? 'previewSummarySave' : 'previewTagsSave';
+      showSaveHint(hintId, false, '保存失败：' + (data.message || ''));
+    }
+  } catch (err) {
+    console.error('saveAiAnalysis error:', err);
+  }
+}
+
+async function deleteCurrentFile() {
+  const modal = document.getElementById('imagePreviewModal');
+  if (!modal || !modal._previewData) return;
+  const file = modal._previewData;
+  if (!confirm('确定删除文件 "' + file.name + '" 吗？此操作不可撤销。')) return;
+
+  try {
+    const res = await fetch('/files/' + file.id, { method: 'DELETE' });
+    const data = await res.json();
+    if (data.success) {
+      closePreview();
+      // 从 DOM 中移除该文件项
+      const fileItem = document.querySelector('.file-item-row[data-id="' + file.id + '"]');
+      if (fileItem) fileItem.remove();
+      // 也可以 location.reload() 强制刷新，但移除 DOM 更流畅
+    } else {
+      alert('删除失败：' + (data.message || ''));
+    }
+  } catch (err) {
+    console.error('deleteCurrentFile error:', err);
+    alert('删除失败');
+  }
+}
+
+// ============= 路径编辑 =============
+async function openFolderPicker() {
+  const modal = document.getElementById('previewFolderPicker');
+  if (!modal) return;
+  modal._selectedFolderId = null;
+  modal.classList.add('show');
+  await populatePreviewFolderTree();
+}
+
+function closeFolderPicker() {
+  const modal = document.getElementById('previewFolderPicker');
+  if (modal) modal.classList.remove('show');
+}
+
+async function populatePreviewFolderTree() {
+  const tree = document.getElementById('previewFolderTree');
+  if (!tree) return;
+  tree.innerHTML = '';
+  tree._selectedEl = null;
+  tree._selectedFolderId = '';
+
+  // 根目录（不默认选中，用户必须点选才能确定）
+  const root = document.createElement('div');
+  root.className = 'folder-item root';
+  root.dataset.id = '';
+  root.dataset.selectable = 'true';
+  root.innerHTML = '<span class="folder-icon">📂</span><span class="folder-name">全部文件（根目录）</span>';
+  root.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (tree._selectedEl) tree._selectedEl.classList.remove('selected');
+    root.classList.add('selected');
+    tree._selectedEl = root;
+    tree._selectedFolderId = '';
+  });
+  tree.appendChild(root);
+
+  try {
+    const res = await fetch('/folders', { headers: { 'Accept': 'application/json' } });
+    const data = await res.json();
+    if (!data.data || !Array.isArray(data.data)) return;
+
+    const folderMap = {};
+    const rootFolders = [];
+    data.data.forEach(f => { folderMap[f._id] = { ...f, children: [] }; });
+    data.data.forEach(f => {
+      if (f.parent && folderMap[f.parent]) {
+        folderMap[f.parent].children.push(folderMap[f._id]);
+      } else {
+        rootFolders.push(folderMap[f._id]);
+      }
+    });
+
+    const renderNode = (node, depth) => {
+      const item = document.createElement('div');
+      item.className = 'folder-item child';
+      item.dataset.id = node._id;
+      item.dataset.selectable = 'true';
+      item.style.paddingLeft = (12 + depth * 16) + 'px';
+      item.innerHTML = '<span class="folder-icon">📁</span><span class="folder-name">' + node.name + '</span>';
+      item.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (tree._selectedEl) tree._selectedEl.classList.remove('selected');
+        item.classList.add('selected');
+        tree._selectedEl = item;
+        tree._selectedFolderId = node._id;
+      });
+      tree.appendChild(item);
+      if (node.children?.length > 0) {
+        node.children.forEach(c => renderNode(c, depth + 1));
+      }
+    };
+    rootFolders.forEach(n => renderNode(n, 1));
+  } catch (e) {
+    console.error('populatePreviewFolderTree error:', e);
+  }
+}
+
+async function confirmFolderChange() {
+  const modal = document.getElementById('previewFolderPicker');
+  const mainModal = document.getElementById('imagePreviewModal');
+  if (!modal || !mainModal || !mainModal._previewData) {
+    closeFolderPicker();
+    return;
+  }
+  const fileId = mainModal._previewData.id;
+
+  // 收集选中的文件夹 id（根目录时为空字符串）
+  const tree = document.getElementById('previewFolderTree');
+  const selectedEl = tree?.querySelector('.folder-item.selected');
+  const folderId = selectedEl?.dataset.id || '';
+  // 不变就没动
+  const currentFolderId = mainModal._previewData._rawFolderId || '';
+
+  // 总是先关闭弹窗，再处理保存
+  closeFolderPicker();
+
+  if (folderId === currentFolderId) return;
+
+  try {
+    const res = await fetch('/files/' + fileId + '/move', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ folder: folderId || null })
+    });
+    const data = await res.json();
+    if (data.success) {
+      // 更新本地缓存
+      mainModal._previewData.folderId = folderId || null;
+      mainModal._previewData._rawFolderId = folderId;
+      // 重新拉详情以更新路径字符串
+      await refreshPreviewInfo();
+    } else {
+      alert('移动失败：' + (data.message || ''));
+    }
+  } catch (e) {
+    console.error('confirmFolderChange error:', e);
+    alert('移动失败');
+  }
+}
+
+async function refreshPreviewInfo() {
+  const modal = document.getElementById('imagePreviewModal');
+  if (!modal || !modal._previewData) return;
+  const fileId = modal._previewData.id;
+
+  try {
+    const res = await fetch('/files/' + fileId + '/info');
+    const data = await res.json();
+    if (!data.success) return;
+    modal._previewData = { ...modal._previewData, ...data.file };
+
+    const pathEl = document.getElementById('previewFolderPath');
+    if (pathEl) pathEl.textContent = data.file.folderPath ? '/' + data.file.folderPath : '根目录';
+  } catch (e) {
+    console.error('refreshPreviewInfo error:', e);
+  }
+}
+
+// ============= AI 重新分析 =============
+async function reanalyzeCurrentFile() {
+  const modal = document.getElementById('imagePreviewModal');
+  if (!modal || !modal._previewData) return;
+  const fileId = modal._previewData.id;
+
+  const btn = document.getElementById('previewReanalyzeBtn');
+  if (btn) {
+    btn.disabled = true;
+    btn.querySelector('span').textContent = '分析中...';
+  }
+
+  try {
+    const res = await fetch('/files/' + fileId + '/analyze', { method: 'POST' });
+    const data = await res.json();
+    if (!data.success) {
+      alert('启动分析失败：' + (data.message || ''));
+      if (btn) {
+        btn.disabled = false;
+        btn.querySelector('span').textContent = '重新分析';
+      }
+      return;
+    }
+
+    if (data.status === 'skipped') {
+      alert(data.message || '此文件不支持 AI 分析');
+      if (btn) {
+        btn.disabled = false;
+        btn.querySelector('span').textContent = '重新分析';
+      }
+      return;
+    }
+
+    // 立即轮询
+    pollAnalyzeStatus(fileId, 0);
+  } catch (e) {
+    console.error('reanalyzeCurrentFile error:', e);
+    if (btn) {
+      btn.disabled = false;
+      btn.querySelector('span').textContent = '重新分析';
+    }
+    alert('启动分析失败');
+  }
+}
+
+async function pollAnalyzeStatus(fileId, attempt) {
+  const modal = document.getElementById('imagePreviewModal');
+  if (!modal || modal._previewData?.id !== fileId) return; // 用户已切换/关闭
+
+  const MAX_ATTEMPTS = 60; // 最多轮询 60 次（5 分钟）
+
+  if (attempt >= MAX_ATTEMPTS) {
+    const btn = document.getElementById('previewReanalyzeBtn');
+    if (btn) {
+      btn.disabled = false;
+      btn.querySelector('span').textContent = '重新分析';
+    }
+    alert('分析超时');
+    return;
+  }
+
+  try {
+    const res = await fetch('/files/' + fileId + '/ai-status');
+    const data = await res.json();
+    if (data.status === 'done') {
+      // 刷新右栏所有 AI 字段
+      const btn = document.getElementById('previewReanalyzeBtn');
+      if (btn) {
+        btn.disabled = false;
+        btn.querySelector('span').textContent = '重新分析';
+      }
+
+      // 显示"已更新"提示
+      showSaveHint('previewSummarySave', true, '✓ 已重新分析');
+
+      // 直接更新字段
+      if (data.result) {
+        const catSel = document.getElementById('previewCategorySelect');
+        if (catSel) catSel.value = data.result.category || '其他';
+        const sumIn = document.getElementById('previewSummaryInput');
+        if (sumIn) sumIn.value = data.result.summary || '';
+        renderPreviewTags(data.result.labels || []);
+      } else {
+        // 没返回 result，重新拉详情
+        await refreshPreviewInfo();
+      }
+      return;
+    }
+  } catch (e) {
+    console.error('pollAnalyzeStatus error:', e);
+  }
+
+  // 每 5 秒轮询
+  setTimeout(() => pollAnalyzeStatus(fileId, attempt + 1), 5000);
 }

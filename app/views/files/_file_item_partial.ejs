@@ -3,16 +3,16 @@
 <% const isVideo = ['.mp4', '.avi', '.mov', '.wmv', '.flv', '.mkv', '.webm', '.m4v', '.3gp'].includes(file.extension.toLowerCase()); %>
 <div class="file-item file-item-row" data-type="file" data-id="<%= file._id %>" data-image="<%= isImage %>" data-video="<%= isVideo %>" data-ai-pending="<%= file.aiAnalysis && !file.aiAnalysis.analyzed ? 'true' : 'false' %>" draggable="true">
   <input type="checkbox" class="file-checkbox" data-id="<%= file._id %>">
-  <% if (isImage || (isVideo && file.thumb)) { %>
+  <% const hasThumb = file.thumb && file.thumb.path; %>
+  <% if (isImage || (isVideo && hasThumb)) { %>
   <div class="file-thumb-container" data-full-url="<%= isVideo ? '/files/' + file._id + '/stream' : '/files/' + file._id + '/preview' %>" data-type="<%= isVideo ? 'video' : 'image' %>">
-    <% if (isVideo && file.thumb) { %>
-    <img src="/files/<%= file._id %>/thumb" class="file-thumb" alt="<%= file.originalName %>" loading="lazy">
+    <% if (isVideo) { %>
     <div class="video-play-overlay">
       <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
     </div>
-    <% } else { %>
-    <img src="/files/<%= file._id %>/thumb" class="file-thumb" alt="<%= file.originalName %>" loading="lazy">
     <% } %>
+    <img src="/files/<%= file._id %>/thumb" class="file-thumb" alt="<%= file.originalName %>" loading="lazy" width="64" height="64"
+         onerror="this.onerror=null; this.style.display='none'; this.parentElement.classList.add('thumb-failed'); this.parentElement.setAttribute('data-fallback-icon', '<%= file.extension.toUpperCase().replace(/^./, '') %>');">
   </div>
   <% } else { %>
   <div class="file-icon <%= getFileIconClass(file.extension) %>">

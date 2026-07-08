@@ -1,0 +1,28 @@
+<% files.forEach(function(file) { %>
+<% const isImage = ['jpg','jpeg','png','gif','bmp','webp','svg','ico'].includes(file.extension.toLowerCase().replace(/^./, '')); %>
+<% const isVideo = ['mp4','avi','mov','wmv','flv','mkv','webm','m4v','3gp'].includes(file.extension.toLowerCase().replace(/^./, '')); %>
+<% const hasThumb = file.thumb && file.thumb.path; %>
+<div class="gallery-item">
+  <% if (hasThumb || isImage) { %>
+    <img class="gallery-thumb"
+         src="/files/<%= file._id %>/thumb"
+         data-full-url="/files/<%= file._id %>/<%= isVideo ? 'stream' : 'preview' %>"
+         data-file-id="<%= file._id %>"
+         data-file-name="<%= file.originalName %>"
+         alt="<%= file.originalName %>"
+         loading="lazy"
+         decoding="async"
+         width="180" height="180">
+  <% } else { %>
+    <div class="gallery-thumb gallery-thumb-placeholder">
+      <span class="file-icon-ext"><%= file.extension.toUpperCase().replace(/^./, '') %></span>
+    </div>
+  <% } %>
+  <div class="gallery-name" title="<%= file.originalName %>"><%= file.originalName %></div>
+  <div class="gallery-meta">
+    <span><%= formatFileSize(file.size) %></span>
+    <span>•</span>
+    <span><%= formatDate(file.updatedAt) %></span>
+  </div>
+</div>
+<% }) %>

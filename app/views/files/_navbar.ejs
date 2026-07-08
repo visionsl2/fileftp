@@ -1,0 +1,24 @@
+<header class="app-header">
+  <div class="header-left">
+    <h1 class="app-title">赛博网盘</h1>
+  </div>
+  <div class="header-right">
+    <a href="/files" class="nav-link<%= typeof currentPage !== 'undefined' && currentPage === 'files' ? ' active' : '' %>">📁 文件</a>
+    <a href="/files/gallery" class="nav-link<%= typeof currentPage !== 'undefined' && currentPage === 'gallery' ? ' active' : '' %>">📷 总览</a>
+    <span class="username"><%= user.username %></span>
+    <span class="storage-info">
+      <%= (user.storageUsed / 1024 / 1024).toFixed(1) %> / <%= (user.storageQuota / 1024 / 1024 / 1024).toFixed(1) %> GB
+    </span>
+    <% if (user.role === 'admin') { %>
+    <span class="ai-quota admin">🤖 管理员</span>
+    <% } else if (typeof aiQuota !== 'undefined' && aiQuota && aiQuota.limited) { %>
+    <span class="ai-quota <%= aiQuota.percent >= 80 ? 'warn' : '' %>" title="本月 AI 分析配额">
+      🤖 <%= aiQuota.used %>/<%= aiQuota.limit %>
+    </span>
+    <% } %>
+    <% if (user.role === 'admin') { %>
+    <a href="/admin" class="btn-logout" style="margin-right:8px;background:rgba(255,255,255,0.15)">⚙️ 管理</a>
+    <% } %>
+    <a href="/auth/logout" class="btn-logout">退出</a>
+  </div>
+</header>

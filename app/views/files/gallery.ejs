@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title><%= title %> - 赛博网盘</title>
+  <link rel="stylesheet" href="/css/filebrowser.css">
+</head>
+<body>
+  <div class="app-container">
+    <%- include('_navbar', { user: user, aiQuota: aiQuota, currentPage: 'gallery' }) %>
+
+    <main class="main-content">
+      <div class="gallery-page">
+        <div class="gallery-header">
+          <h2>📷 总览</h2>
+          <span class="gallery-total">共 <%= pagination.total %> 个文件</span>
+        </div>
+
+        <% if (files.length === 0) { %>
+          <div class="empty-state">
+            <p>还没有上传任何文件</p>
+            <a href="/files" class="btn btn-primary">去上传</a>
+          </div>
+        <% } else { %>
+          <div class="gallery-grid" id="galleryGrid" data-page="<%= pagination.page %>" data-total-pages="<%= pagination.totalPages %>">
+            <%- include('_gallery_item_partial', { files: files, formatFileSize: formatFileSize, formatDate: formatDate }) %>
+          </div>
+          <% if (pagination.page < pagination.totalPages) { %>
+          <div id="loadMoreSentinel" style="text-align:center; padding:30px; color:#999;">加载更多...</div>
+          <% } %>
+        <% } %>
+      </div>
+    </main>
+
+    <!-- 图片预览模态框（复用） -->
+    <div id="imagePreviewModal" class="modal">
+      <span class="modal-close">&times;</span>
+      <img class="modal-content" id="previewImg">
+      <div class="modal-footer">
+        <span id="previewFileName"></span>
+        <a href="#" class="btn-preview-download" id="previewDownloadBtn" target="_blank">
+          <svg viewBox="0 0 24 24"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>
+          下载
+        </a>
+      </div>
+    </div>
+  </div>
+
+  <script src="/js/filebrowser.js"></script>
+  <script>
+    // 总览页：初始化画廊专属逻辑
+    (function() {
+      const grid = document.getElementById('galleryGrid');
+      if (!grid) return;
+
+      // 委托：缩略图点击 → 预览
+      grid.addEventListener('click', (e) => {
+        const thumb = e.target.closest('.gallery-thumb');
+        if (!thumb) return;
+        const url = thumb.dataset.fullUrl;
+        const fileId = thumb.dataset.fileId;
+        const fileName = thumb.dataset.fileName;
+        const modal = document.getElementById('imagePreviewModal');
+        const img = document.getElementById('previewImg');
+        const name = document.getElementById('previewFileName');
+        const dl = document.getElementById('previewDownloadBtn');
+        if (url && img) {
+          img.src = url;
+          if (name) name.textContent = fileName || '';
+          if (dl) dl.href = '/files/' + fileId + '/download';
+          modal.classList.add('show');
+        }
+      });
+
+      // 关闭预览
+      const modal = document.getElementById('imagePreviewModal');
+      modal?.querySelector('.modal-close')?.addEventListener('click', () => modal.classList.remove('show'));
+      modal?.addEventListener('click', (e) => { if (e.target === modal) modal.classList.remove('show'); });
+      document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && modal.classList.contains('show')) modal.classList.remove('show'); });
+
+      // 滚动加载更多（沿用主站模式）
+      const sentinel = document.getElementById('loadMoreSentinel');
+      if (sentinel) {
+        let loading = false;
+        const observer = new IntersectionObserver((entries) => {
+          if (entries[0].isIntersecting && !loading) {
+            loading = true;
+            sentinel.textContent = '加载中...';
+            const nextPage = parseInt(grid.dataset.page || '1') + 1;
+            fetch('/files/gallery/more?page=' + nextPage)
+              .then(r => r.json())
+              .then(data => {
+                if (data.success && data.html) {
+                  const tmp = document.createElement('div');
+                  tmp.innerHTML = data.html;
+                  while (tmp.firstChild) grid.appendChild(tmp.firstChild);
+                  grid.dataset.page = data.nextPage;
+                  if (!data.hasMore) {
+                    observer.disconnect();
+                    sentinel.remove();
+                  } else {
+                    sentinel.textContent = '加载更多...';
+                  }
+                }
+              })
+              .catch(() => { sentinel.textContent = '加载失败，点击重试'; })
+              .finally(() => { loading = false; });
+          }
+        }, { rootMargin: '200px' });
+        observer.observe(sentinel);
+      }
+    })();
+  </script>
+</body>
+</html>
