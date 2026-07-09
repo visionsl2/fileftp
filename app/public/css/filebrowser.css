@@ -1512,6 +1512,99 @@ body {
 .gallery-total {
   font-size: 13px;
   color: #7f8c8d;
+  margin-left: auto;
+}
+
+/* 文件类型筛选栏 */
+.gallery-filter {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.filter-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 14px;
+  border-radius: 16px;
+  font-size: 13px;
+  color: #5a6a7a;
+  background: #f0f2f5;
+  text-decoration: none;
+  border: 1px solid transparent;
+  transition: background 0.15s, color 0.15s;
+}
+
+.filter-pill:hover {
+  background: #e0e7ff;
+  color: #4338ca;
+}
+
+.filter-pill.active {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: #fff;
+}
+
+.filter-count {
+  font-size: 11px;
+  padding: 1px 7px;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.08);
+  color: inherit;
+}
+
+.filter-pill.active .filter-count {
+  background: rgba(255, 255, 255, 0.25);
+}
+
+/* 分页控件 */
+.gallery-pagination {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 6px;
+  margin: 30px 0 10px;
+  flex-wrap: wrap;
+}
+
+.page-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 34px;
+  height: 34px;
+  padding: 0 10px;
+  border-radius: 6px;
+  font-size: 13px;
+  color: #5a6a7a;
+  background: #f0f2f5;
+  text-decoration: none;
+  border: 1px solid transparent;
+  transition: background 0.15s, color 0.15s;
+}
+
+.page-link:hover {
+  background: #e0e7ff;
+  color: #4338ca;
+}
+
+.page-link.active {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: #fff;
+  cursor: default;
+}
+
+.page-link.disabled {
+  color: #c0c7d0;
+  background: #f5f6f8;
+  cursor: not-allowed;
+}
+
+.page-ellipsis {
+  padding: 0 4px;
+  color: #a0a8b0;
+  font-size: 13px;
 }
 
 .gallery-grid {
@@ -1557,6 +1650,60 @@ body {
   color: #95a5a6;
   font-size: 24px;
   font-weight: 600;
+}
+
+/* 视频缩略图包裹层（定位播放按钮） */
+.gallery-thumb-wrap {
+  position: relative;
+  width: 180px;
+  height: 180px;
+}
+
+/* 视频播放按钮 overlay */
+.gallery-video-play {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background 0.2s, transform 0.2s;
+  pointer-events: auto;
+}
+
+.gallery-thumb-wrap:hover .gallery-video-play {
+  background: rgba(102, 126, 234, 0.85);
+  transform: translate(-50%, -50%) scale(1.1);
+}
+
+.gallery-video-play svg {
+  width: 22px;
+  height: 22px;
+  fill: #fff;
+  margin-left: 3px;
+}
+
+/* 缩略图加载失败时的占位（视频/图片通用） */
+.gallery-thumb-failed {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #eef1f5;
+  border: 1px solid #e8ecf1;
+  border-radius: 8px;
+}
+.gallery-thumb-failed::after {
+  content: attr(data-ext);
+  color: #95a5a6;
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: 1px;
 }
 
 .file-icon-ext {

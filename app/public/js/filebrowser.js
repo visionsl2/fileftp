@@ -1,7 +1,31 @@
 document.addEventListener('DOMContentLoaded', () => {
-  const fileBrowser = new FileBrowser();
-  window.fileBrowser = fileBrowser;
+  // 文件浏览器页（有 #fileList）→ 完整 FileBrowser
+  // 总览页（只有 #galleryGrid，无 #fileList）→ 只初始化预览/视频/lightbox
+  if (document.getElementById('fileList')) {
+    const fileBrowser = new FileBrowser();
+    window.fileBrowser = fileBrowser;
+  } else if (document.getElementById('galleryGrid')) {
+    initGalleryPage();
+  }
 });
+
+// 总览页轻量初始化：复用完整图片预览 + 视频播放器 + lightbox
+function initGalleryPage() {
+  const gb = new GalleryBrowser();
+  window.galleryBrowser = gb;
+}
+
+// 借用 FileBrowser 的 initImagePreview / initVideoPlayer（内部已支持 #galleryGrid）
+class GalleryBrowser {
+  constructor() {
+    // 复用 FileBrowser 原型上的方法
+    this.initImagePreview = FileBrowser.prototype.initImagePreview;
+    this.initVideoPlayer = FileBrowser.prototype.initVideoPlayer;
+    this.initImagePreview();
+    this.initVideoPlayer();
+    window.__lightbox = new Lightbox();
+  }
+}
 
 class FileBrowser {
   constructor() {
@@ -628,17 +652,31 @@ class FileBrowser {
     if (!modal) return;
 
     // 委托：缩略图点击 → 打开完整预览
-    const fileList = document.getElementById('fileList');
-    if (fileList && !fileList._imagePreviewBound) {
-      fileList.addEventListener('click', (e) => {
-        const container = e.target.closest('.file-thumb-container:not([data-type="video"])');
-        if (!container) return;
-        const fileItem = container.closest('.file-item');
-        const fileId = fileItem?.dataset.id;
-        if (fileId) openPreview(fileId);
+    // 支持两个容器：文件浏览器(#fileList) 和 总览页(#galleryGrid)
+    const containers = [
+      document.getElementById('fileList'),
+      document.getElementById('galleryGrid')
+    ].filter(Boolean);
+    containers.forEach((container) => {
+      if (container._imagePreviewBound) return;
+      container.addEventListener('click', (e) => {
+        // 总览页：.gallery-thumb（非视频）；文件浏览器：.file-thumb-container（非视频）
+        const galleryThumb = e.target.closest('.gallery-thumb:not([data-is-video="true"])');
+        if (galleryThumb && container.id === 'galleryGrid') {
+          if (galleryThumb.classList.contains('gallery-thumb-placeholder')) return;
+          const fileId = galleryThumb.dataset.fileId;
+          if (fileId) openPreview(fileId);
+          return;
+        }
+        const fileContainer = e.target.closest('.file-thumb-container:not([data-type="video"])');
+        if (fileContainer) {
+          const fileItem = fileContainer.closest('.file-item');
+          const fileId = fileItem?.dataset.id;
+          if (fileId) openPreview(fileId);
+        }
       });
-      fileList._imagePreviewBound = true;
-    }
+      container._imagePreviewBound = true;
+    });
 
     // 单次绑定关闭按钮
     if (!modal._closeBound) {
@@ -731,32 +769,43 @@ class FileBrowser {
     const modal = document.getElementById('videoPlayerModal');
     const videoPlayer = document.getElementById('videoPlayer');
     const closeBtn = document.getElementById('closeVideoPlayer');
-    const videoFileName = document.getElementById('videoFileName');
-    const downloadBtn = document.getElementById('videoDownloadBtn');
 
     if (!modal || !videoPlayer) return;
 
     // 事件委托：视频缩略图点击统一处理
-    const fileList = document.getElementById('fileList');
-    if (fileList && !fileList._videoPlayerBound) {
-      fileList.addEventListener('click', (e) => {
-        const container = e.target.closest('.file-thumb-container[data-type=\"video\"]');
-        if (!container) return;
-        e.stopPropagation();
-        const streamUrl = container.dataset.fullUrl;
-        const fileItem = container.closest('.file-item');
-        const fileId = fileItem?.dataset.id;
-        const fileName = fileItem?.querySelector('.file-name')?.textContent;
-        if (streamUrl) {
-          videoPlayer.src = streamUrl;
-          if (videoFileName) videoFileName.textContent = fileName || '';
-          if (downloadBtn) downloadBtn.href = '/files/' + fileId + '/download';
-          modal.classList.add('show');
-          videoPlayer.play().catch(() => {});
+    // 支持两个容器：文件浏览器(#fileList) 和 总览页(#galleryGrid)
+    const containers = [
+      document.getElementById('fileList'),
+      document.getElementById('galleryGrid')
+    ].filter(Boolean);
+    containers.forEach((container) => {
+      if (container._videoPlayerBound) return;
+      container.addEventListener('click', (e) => {
+        // 总览页视频缩略图或播放按钮
+        const galleryThumb = e.target.closest('.gallery-thumb[data-is-video="true"], .gallery-video-play');
+        if (galleryThumb && container.id === 'galleryGrid') {
+          e.stopPropagation();
+          openVideoPlayer(
+            galleryThumb.dataset.fullUrl,
+            galleryThumb.dataset.fileId,
+            galleryThumb.dataset.fileName
+          );
+          return;
+        }
+        // 文件浏览器视频缩略图
+        const fileContainer = e.target.closest('.file-thumb-container[data-type="video"]');
+        if (fileContainer) {
+          e.stopPropagation();
+          const fileItem = fileContainer.closest('.file-item');
+          openVideoPlayer(
+            fileContainer.dataset.fullUrl,
+            fileItem?.dataset.id,
+            fileItem?.querySelector('.file-name')?.textContent
+          );
         }
       });
-      fileList._videoPlayerBound = true;
-    }
+      container._videoPlayerBound = true;
+    });
 
     if (!modal._closeBound) {
       closeBtn?.addEventListener('click', () => {
@@ -1636,6 +1685,20 @@ class Lightbox {
 }
 
 // ============= 预览辅助函数 =============
+
+// 打开视频播放器（供 #fileList 和 #galleryGrid 共用）
+function openVideoPlayer(streamUrl, fileId, fileName) {
+  const modal = document.getElementById('videoPlayerModal');
+  const videoPlayer = document.getElementById('videoPlayer');
+  const videoFileName = document.getElementById('videoFileName');
+  const downloadBtn = document.getElementById('videoDownloadBtn');
+  if (!modal || !videoPlayer || !streamUrl) return;
+  videoPlayer.src = streamUrl;
+  if (videoFileName) videoFileName.textContent = fileName || '';
+  if (downloadBtn && fileId) downloadBtn.href = '/files/' + fileId + '/download';
+  modal.classList.add('show');
+  videoPlayer.play().catch(() => {});
+}
 
 async function openPreview(fileId) {
   const modal = document.getElementById('imagePreviewModal');

@@ -10,9 +10,8 @@ router.get('/', fileController.listFiles);
 router.get('/more', fileController.loadMoreFiles);
 router.get('/search', fileController.searchFiles);
 
-// 总览页：按上传时间倒序展示所有文件（只读）
+// 总览页：按上传时间倒序展示所有文件（只读，支持 ?page=N&type=image|video|other）
 router.get('/gallery', fileController.showGallery);
-router.get('/gallery/more', fileController.loadMoreGallery);
 
 // 使用 formidable 处理上传（保留中文文件名）
 router.post('/upload', fileController.uploadFiles);

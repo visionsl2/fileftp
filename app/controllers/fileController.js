@@ -161,8 +161,8 @@ const fileController = {
   },
 
   /**
-   * 总览页：按上传时间倒序展示所有文件
-   * GET /files/gallery
+   * 总览页：按上传时间倒序展示所有文件（传统翻页 + 文件类型筛选）
+   * GET /files/gallery?page=N&type=image|video|other
    * 仅当前用户，不可跨用户访问
    */
   showGallery: async (req, res) => {
@@ -170,21 +170,49 @@ const fileController = {
       const userId = req.userId || req.session?.userId;
       if (!userId) return res.redirect('/auth/login');
 
-      const pageNum = 1;
       const limitNum = 50;
-      const skip = 0;
-      const fileFields = 'originalName extension mimeType size folder updatedAt thumb';
+      const type = ['image', 'video', 'other'].includes(req.query.type) ? req.query.type : '';
 
-      const [user, files, totalFiles] = await Promise.all([
+      // 复用 storageService 扩展名定义，避免重复维护
+      const imageExts = storageService.IMAGE_EXTENSIONS;
+      const videoExts = storageService.VIDEO_EXTENSIONS;
+      const mediaExts = [...imageExts, ...videoExts];
+      // 预计算大小写不敏感的正则数组（只生成一次）
+      const toRegex = (ext) => new RegExp('^' + ext.replace('.', '\\.') + '$', 'i');
+      const imgRegexIn = imageExts.map(toRegex);
+      const videoRegexIn = videoExts.map(toRegex);
+      const mediaRegexIn = mediaExts.map(toRegex);
+
+      // 基础查询条件
+      const baseQuery = { owner: userId, isDeleted: false };
+      let query = baseQuery;
+      if (type === 'image') query = { ...baseQuery, extension: { $in: imgRegexIn } };
+      else if (type === 'video') query = { ...baseQuery, extension: { $in: videoRegexIn } };
+      else if (type === 'other') query = { ...baseQuery, extension: { $nin: mediaRegexIn } };
+
+      // 先算总数用于边界钳制
+      const totalFiles = await File.countDocuments(query);
+      const totalPages = Math.max(1, Math.ceil(totalFiles / limitNum));
+      let pageNum = Math.max(1, parseInt(req.query.page) || 1);
+      if (pageNum > totalPages) pageNum = totalPages;
+      const skip = (pageNum - 1) * limitNum;
+
+      const fileFields = 'originalName extension mimeType size folder updatedAt thumb aiAnalysis';
+
+      // 各类型数量（用于筛选标签角标）
+      const [user, files, countAll, countImage, countVideo] = await Promise.all([
         User.findById(userId),
-        File.find({ owner: userId, isDeleted: false })
+        File.find(query)
           .select(fileFields)
           .sort({ createdAt: -1 })
           .skip(skip)
           .limit(limitNum)
           .lean(),
-        File.countDocuments({ owner: userId, isDeleted: false })
+        File.countDocuments(baseQuery),
+        File.countDocuments({ ...baseQuery, extension: { $in: imgRegexIn } }),
+        File.countDocuments({ ...baseQuery, extension: { $in: videoRegexIn } })
       ]);
+      const countOther = countAll - countImage - countVideo;
 
       const aiQuota = await getAiQuota(user);
 
@@ -192,7 +220,14 @@ const fileController = {
         files,
         user,
         aiQuota,
-        pagination: { page: pageNum, limit: limitNum, total: totalFiles, totalPages: Math.ceil(totalFiles / limitNum) },
+        pagination: {
+          page: pageNum,
+          limit: limitNum,
+          total: totalFiles,
+          totalPages,
+          type
+        },
+        typeCounts: { all: countAll, image: countImage, video: countVideo, other: countOther },
         title: '总览',
         formatFileSize: helpers.formatFileSize,
         formatDate: helpers.formatDate
@@ -200,50 +235,6 @@ const fileController = {
     } catch (error) {
       console.error('showGallery error:', error);
       res.status(500).json({ success: false, message: '加载总览失败' });
-    }
-  },
-
-  /**
-   * 总览页滚动加载更多
-   * GET /files/gallery/more?page=2
-   */
-  loadMoreGallery: async (req, res) => {
-    try {
-      const userId = req.userId || req.session?.userId;
-      if (!userId) return res.status(401).json({ success: false, message: '未认证' });
-
-      const pageNum = Math.max(1, parseInt(req.query.page) || 1);
-      const limitNum = 50;
-      const skip = (pageNum - 1) * limitNum;
-      const fileFields = 'originalName extension mimeType size folder updatedAt thumb';
-
-      const [files, totalFiles] = await Promise.all([
-        File.find({ owner: userId, isDeleted: false })
-          .select(fileFields)
-          .sort({ createdAt: -1 })
-          .skip(skip)
-          .limit(limitNum)
-          .lean(),
-        File.countDocuments({ owner: userId, isDeleted: false })
-      ]);
-
-      res.render('files/_gallery_item_partial', {
-        files,
-        formatFileSize: helpers.formatFileSize,
-        formatDate: helpers.formatDate
-      }, (err, html) => {
-        if (err) return res.status(500).json({ success: false, message: '渲染失败' });
-        res.json({
-          success: true,
-          html,
-          hasMore: skip + files.length < totalFiles,
-          nextPage: pageNum + 1,
-          total: totalFiles
-        });
-      });
-    } catch (error) {
-      console.error('loadMoreGallery error:', error);
-      res.status(500).json({ success: false, message: '加载更多失败' });
     }
   },
 
@@ -804,10 +795,13 @@ const fileController = {
         // 已有缩略图 → 直接返回
         filePath = storageService.resolvePath(file.thumb.path);
       } else {
-        // 无缩略图 → 图片实时生成并回填（避免返回几MB原图）
+        // 无缩略图 → 实时生成并回填（避免返回几MB原图/视频原文件）
         const imageExts = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.svg', '.ico'];
-        const isImg = imageExts.includes(file.extension.toLowerCase());
-        if (isImg) {
+        const videoExts = ['.mp4', '.avi', '.mov', '.wmv', '.flv', '.mkv', '.webm', '.m4v', '.3gp'];
+        const ext = file.extension.toLowerCase();
+
+        if (imageExts.includes(ext)) {
+          // 图片：sharp 实时缩放
           try {
             const thumb = await storageService.generateThumbnail(
               filePath, file._id.toString(), userId
@@ -816,16 +810,31 @@ const fileController = {
               file.thumb = thumb;
               await file.save();
               filePath = storageService.resolvePath(thumb.path);
-              // 生成成功后 thumbVersion 变化，刷新 ETag 让浏览器缓存新缩略图
               res.setHeader('ETag', '"' + file._id.toString() + '-t1"');
             }
             // thumb 为 null（sharp 不可用）时 filePath 保持原图兜底
           } catch (thumbErr) {
-            console.warn('[Thumbnail] 实时生成失败，回退原图:', file._id.toString(), thumbErr.message);
-            // 保持 filePath = 原图兜底
+            console.warn('[Thumbnail] 图片实时生成失败，回退原图:', file._id.toString(), thumbErr.message);
+          }
+        } else if (videoExts.includes(ext)) {
+          // 视频：ffmpeg 实时截帧生成缩略图
+          try {
+            const thumb = await storageService.generateVideoThumbnail(
+              filePath, file._id.toString(), userId
+            );
+            if (thumb && thumb.path) {
+              file.thumb = thumb;
+              await file.save();
+              filePath = storageService.resolvePath(thumb.path);
+              res.setHeader('ETag', '"' + file._id.toString() + '-t1"');            } else {
+              // ffmpeg 不可用或生成失败 → 返回 404，前端 onerror 显示占位
+              return res.status(404).json({ success: false, message: '视频缩略图不可用' });
+            }
+          } catch (thumbErr) {
+            console.warn('[Thumbnail] 视频实时生成失败:', file._id.toString(), thumbErr.message);
+            return res.status(404).json({ success: false, message: '视频缩略图生成失败' });
           }
         }
-        // 视频无 thumb 时 filePath 保持原图（前端仅在 hasThumb 时才请求视频 thumb，通常不会走到）
       }
 
       const readStream = storageService.createReadStream(filePath);

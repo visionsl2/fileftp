@@ -427,3 +427,5 @@ class StorageService {
 }
 
 module.exports = new StorageService();
+module.exports.IMAGE_EXTENSIONS = IMAGE_EXTENSIONS;
+module.exports.VIDEO_EXTENSIONS = VIDEO_EXTENSIONS;

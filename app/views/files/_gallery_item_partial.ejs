@@ -3,16 +3,25 @@
 <% const isVideo = ['mp4','avi','mov','wmv','flv','mkv','webm','m4v','3gp'].includes(file.extension.toLowerCase().replace(/^./, '')); %>
 <% const hasThumb = file.thumb && file.thumb.path; %>
 <div class="gallery-item">
-  <% if (hasThumb || isImage) { %>
-    <img class="gallery-thumb"
-         src="/files/<%= file._id %>/thumb"
-         data-full-url="/files/<%= file._id %>/<%= isVideo ? 'stream' : 'preview' %>"
-         data-file-id="<%= file._id %>"
-         data-file-name="<%= file.originalName %>"
-         alt="<%= file.originalName %>"
-         loading="lazy"
-         decoding="async"
-         width="180" height="180">
+  <% if (isImage || isVideo) { %>
+    <div class="gallery-thumb-wrap">
+      <img class="gallery-thumb<%= isVideo ? ' gallery-thumb-video' : '' %>"
+           src="/files/<%= file._id %>/thumb"
+           data-full-url="/files/<%= file._id %>/<%= isVideo ? 'stream' : 'preview' %>"
+           data-file-id="<%= file._id %>"
+           data-file-name="<%= file.originalName %>"
+           data-is-video="<%= isVideo ? 'true' : 'false' %>"
+           alt="<%= file.originalName %>"
+           loading="lazy"
+           decoding="async"
+           width="180" height="180"
+           onerror="this.onerror=null; this.style.display='none'; this.parentElement.classList.add('gallery-thumb-failed'); this.parentElement.setAttribute('data-ext', '<%= file.extension.toUpperCase().replace(/^./, '') %>');">
+      <% if (isVideo) { %>
+      <div class="gallery-video-play" data-file-id="<%= file._id %>" data-full-url="/files/<%= file._id %>/stream" data-file-name="<%= file.originalName %>" data-is-video="true">
+        <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+      </div>
+      <% } %>
+    </div>
   <% } else { %>
     <div class="gallery-thumb gallery-thumb-placeholder">
       <span class="file-icon-ext"><%= file.extension.toUpperCase().replace(/^./, '') %></span>
